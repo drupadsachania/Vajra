@@ -1,0 +1,433 @@
+{
+  "_meta": {
+    "format": "securefoundation-requirements-lock",
+    "version": "1.0",
+    "locked_at": "2026-06-07",
+    "spec_file": "ARCHITECTURE.md",
+    "spec_sha256": "ce0f4215603a70baf078946f8d1e6dead4e1d13cd44a111124d208d91c035943",
+    "note": "All values in this file are locked. Any change requires operator sign-off and a new REQUIREMENTS.lock with updated spec_sha256. An implementation that contradicts a value in this file is non-compliant."
+  },
+
+  "operator_locked_decisions": {
+    "fusion_architecture": {
+      "choice": "parallel_domain_specific_encoders_epistemic_fusion",
+      "rejected": ["dense_early_fusion_cross_attention", "mixture_of_experts"],
+      "section": "0 (Decision Log), §4"
+    },
+    "output_architecture": {
+      "choice": "T5_style_encoder_decoder_constrained_decoder",
+      "rejected": ["encoder_only", "latent_cot_depth_recurrent"],
+      "section": "0 (Decision Log), §6"
+    },
+    "tokenization": {
+      "choice": "modular_multi_tokenizer_numerical_plus_graph_plus_sentinel_text",
+      "paths": ["numerical_sub_tokenizer", "graph_embedding_pipeline", "S_TOON_sentinel_bounded_text"],
+      "shared_projection_dim": 1024,
+      "rejected": ["universal_bpe", "single_modality_text_tokenizer"],
+      "section": "0 (Decision Log), §2"
+    },
+    "knowledge_boundary": {
+      "baked_in": {
+        "content": "MITRE_ATT&CK_Enterprise_v16_tactics_and_techniques_only",
+        "tactics_count": 14,
+        "techniques_approx": 700,
+        "frozen_after_stage": 1
+      },
+      "via_argus_rag": [
+        "CVE_records",
+        "D3FEND_mitigations",
+        "identity_graphs_active_directory",
+        "live_IOC_lists",
+        "MISP_threat_actor_feeds",
+        "CVE_records_post_training_cutoff",
+        "Sigma_rule_updates",
+        "ATT&CK_sub_technique_updates_post_v16"
+      ],
+      "section": "0 (Decision Log), §10.1"
+    }
+  },
+
+  "hard_constraints": {
+    "max_total_parameters": "4_000_000_000",
+    "inference_hardware": "single_GPU",
+    "max_inference_latency_ms_no_decoder": 120,
+    "max_inference_latency_ms_with_decoder": 150,
+    "exploit_synthesis_in_weights": false,
+    "free_text_attack_tooling_output": false,
+    "decoder_vocabulary_mask_level": "logit_level_p_equals_neg_infinity",
+    "training_data_pii": false,
+    "real_ips_in_training": false,
+    "allowed_ip_ranges_in_training": ["RFC1918", "RFC5737_documentation"],
+    "license": "Apache-2.0",
+    "ecl_markers_required": true,
+    "ecl_states": ["ACT", "ESCALATE", "DEFER", "FAIL_SAFE"],
+    "interpretability_method": "AFN_L2_norm_intermediate_layers",
+    "raw_attention_heatmaps_for_interpretability": false
+  },
+
+  "architecture": {
+    "total_parameters_estimated": "1_160_000_000",
+    "shared_d_model": 1024,
+
+    "embedding_layer": {
+      "vocabulary_size": 50432,
+      "token_embedding_params_approx": "52M",
+      "source_type_count": 16,
+      "source_type_embedding_params_approx": "16M",
+      "temporal_encoding": "ContiFormer_continuous_time",
+      "temporal_frequency_pairs": 128,
+      "temporal_encoding_dim": 256,
+      "temporal_projection_dim": 1024,
+      "ontology_embedding_method": "TransE_plus_RotatE_plus_GCN_2layer",
+      "ontology_embedding_dim_pre_projection": 256,
+      "ontology_embedding_dim_post_projection": 1024,
+      "ontology_frozen_after_stage": 1
+    },
+
+    "domain_encoders": {
+      "detection_network": {
+        "layers": 12,
+        "d_model": 1024,
+        "attention_heads": 16,
+        "ffn_width": 4096,
+        "params_approx": "200M",
+        "dcat_layers": [7, 8]
+      },
+      "forensics_provenance": {
+        "layers": 12,
+        "d_model": 1024,
+        "attention_heads": 16,
+        "ffn_width": 4096,
+        "params_approx": "200M",
+        "dcat_layers": [7, 8]
+      },
+      "cti_stix": {
+        "layers": 8,
+        "d_model": 768,
+        "attention_heads": 12,
+        "ffn_width": 3072,
+        "params_approx": "85M",
+        "dcat_layers": []
+      },
+      "vulnerability_risk": {
+        "layers": 8,
+        "d_model": 768,
+        "attention_heads": 12,
+        "ffn_width": 3072,
+        "params_approx": "85M",
+        "dcat_layers": []
+      },
+      "identity_access": {
+        "layers": 6,
+        "d_model": 768,
+        "attention_heads": 12,
+        "ffn_width": 3072,
+        "params_approx": "65M",
+        "dcat_layers": []
+      },
+      "incident_response": {
+        "layers": 6,
+        "d_model": 768,
+        "attention_heads": 12,
+        "ffn_width": 3072,
+        "params_approx": "65M",
+        "dcat_layers": []
+      },
+      "compliance": {
+        "layers": 4,
+        "d_model": 512,
+        "attention_heads": 8,
+        "ffn_width": 2048,
+        "params_approx": "28M",
+        "dcat_layers": []
+      }
+    },
+
+    "encoder_shared_config": {
+      "normalization": "pre_LayerNorm",
+      "positional_encoding": "RoPE",
+      "attention_pattern": "bidirectional_non_causal",
+      "activation": "GELU",
+      "ffn_variant": "SwiGLU",
+      "dropout_training": 0.1,
+      "dropout_inference": 0.0,
+      "shared_weights_across_encoders": false,
+      "cross_encoder_attention_within_stacks": false
+    },
+
+    "head_group_specialization": {
+      "enforcement": "soft_regularization_via_auxiliary_probing_loss",
+      "NOT_hardwired": true,
+      "groups": {
+        "temporal_causal":  { "heads_H16": 4, "heads_H12": 3, "heads_H8": 2, "probe_target_AUC": 0.85 },
+        "entity_relation":  { "heads_H16": 4, "heads_H12": 3, "heads_H8": 2, "probe_target_F1": 0.78 },
+        "anomaly_contrast": { "heads_H16": 2, "heads_H12": 2, "heads_H8": 1, "probe_target_F1": 0.80 },
+        "schema_structural":{ "heads_H16": 4, "heads_H12": 4, "heads_H8": 3, "probe_target_accuracy": 0.88 },
+        "domain_bridge_fusion_only": { "heads": 2, "probe_target_F1": 0.75 }
+      }
+    },
+
+    "dcat": {
+      "dual_stream_alpha": 0.3,
+      "ema_beta_baseline_update": 0.9,
+      "baseline_frozen_on_ecl_states": ["ESCALATE", "FAIL_SAFE"],
+      "divergence_threshold_symbol": "theta_divergence",
+      "divergence_threshold_value": "EXPERIMENT-1",
+      "window_N_value": "EXPERIMENT-1",
+      "baseline_cache": "separate_KV_cache_not_consuming_context_window"
+    },
+
+    "epistemic_fusion_layer": {
+      "blocks": 6,
+      "block_ids": ["F1", "F2", "F3", "F4", "F5", "F6"],
+      "d_model": 1024,
+      "attention_heads": 16,
+      "ffn_width": 4096,
+      "params_approx": "100M",
+      "input": "7_domain_CLS_tokens",
+      "attention_pattern": "bidirectional_cross_domain",
+      "ecl_tap_fast": "F3",
+      "ecl_tap_fast_condition_defer_confidence_gt": 0.92,
+      "ecl_tap_fast_condition_fail_safe_confidence_gt": 0.85,
+      "ecl_tap_full": "F6",
+      "kill_chain_states": ["RECON", "WEAPONIZE", "DELIVER", "EXPLOIT", "INSTALL", "C2", "EXFIL"],
+      "kill_chain_skip_stages": false
+    },
+
+    "dcat_augmentation_params_approx": "40M",
+
+    "constrained_decoder": {
+      "layers": 8,
+      "d_model": 1024,
+      "attention_heads": 16,
+      "ffn_width": 4096,
+      "params_approx": "160M",
+      "cross_attention_source": "AFN_top_k_evidence_tokens_only",
+      "afn_top_k": 16,
+      "cross_attention_raw_encoder_states_allowed": false,
+      "vocabulary_mask_level": "logit_p_neg_infinity",
+      "max_output_tokens": 256,
+      "invocation_condition": "ECL_state_in_ACT_or_ESCALATE_AND_request_decoder_trace_true",
+      "frozen_during": "domain_specific_fine_tuning",
+      "updated_during": "Stage_4_DPO_alignment_only"
+    },
+
+    "output_heads": {
+      "evidence_chain_dag": {
+        "max_nodes": 32,
+        "architecture": "2_layer_MLP_1024_to_2048_to_max_nodes_squared",
+        "loss": "binary_cross_entropy"
+      },
+      "attack_technique_classifier": {
+        "output_classes": 716,
+        "activation": "sigmoid_multilabel",
+        "threshold_inference": 0.35,
+        "loss": "binary_cross_entropy_label_smoothing_0.1"
+      },
+      "ecl_state_classifier": {
+        "output_classes": 4,
+        "class_map": { "ACT": 0, "ESCALATE": 1, "DEFER": 2, "FAIL_SAFE": 3 },
+        "dcat_override_rule": "if_dcat_D_gt_theta_and_ecl_not_ACT_or_ESCALATE_force_ESCALATE"
+      },
+      "calibrated_confidence": {
+        "method": "temperature_scaling_plus_conformal_prediction",
+        "temperature_T_per_domain": true,
+        "conformal_coverage_targets": [0.90, 0.95],
+        "calibration_set": "OOD_Splunk_Attack_Range_not_in_training"
+      }
+    },
+
+    "afn": {
+      "method": "L2_norm_hidden_state_importance",
+      "layer_target_12L_encoder": 8,
+      "layer_target_8L_encoder": 6,
+      "layer_target_6L_encoder": 4,
+      "layer_target_4L_encoder": 3,
+      "top_k_evidence_tokens": 16,
+      "max_latency_ms": 15
+    }
+  },
+
+  "tokenization": {
+    "sentinel_tokens": [
+      "<|S_START|>", "<|S_END|>", "<|S_KEY|>", "<|S_VAL|>", "<|S_ARR|>", "<|S_NULL|>",
+      "<|S_DOMAIN:detection|>", "<|S_DOMAIN:forensics|>", "<|S_DOMAIN:cti|>",
+      "<|S_DOMAIN:vuln|>", "<|S_DOMAIN:identity|>", "<|S_DOMAIN:ir|>", "<|S_DOMAIN:compliance|>",
+      "<|S_EVTX|>", "<|S_STIX|>", "<|S_SIGMA|>", "<|S_CLOUD|>", "<|S_LDAP|>",
+      "<|S_BASELINE|>", "<|S_OBSERVED|>",
+      "<|ECL_ACT|>", "<|ECL_ESCALATE|>", "<|ECL_DEFER|>", "<|ECL_FAIL_SAFE|>"
+    ],
+    "sentinel_count": 24,
+    "ecl_tokens_encoder_input_allowed": false,
+    "ecl_tokens_decoder_output_allowed": true,
+    "cvss_path": "B_numerical",
+    "cvss_components": 9,
+    "cvss_bpe_allowed": false,
+    "ip_addresses_bpe_allowed": false,
+    "ip_encoding": "RFC1918_slash24_onehot_plus_external_indicator_bit",
+    "netflow_port_embedding_vocab": 65536,
+    "netflow_port_embedding_dim": 64
+  },
+
+  "training_pipeline": {
+    "stages": ["Stage_1_pretraining", "Stage_2_CoT_distillation", "Stage_3_BaNEL_absence", "Stage_4_DPO_ECL_alignment"],
+
+    "stage_1": {
+      "masking": "field_level_not_subtoken",
+      "sentinel_positions_masked": false,
+      "masking_rate_value_spans": 0.15,
+      "sampling_weights": {
+        "detection_alerting": 0.20,
+        "forensics_provenance": 0.25,
+        "threat_intelligence": 0.20,
+        "vulnerability_risk": 0.15,
+        "identity_access": 0.10,
+        "incident_response": 0.05,
+        "compliance": 0.05
+      },
+      "darpa_optc_benign_subsample_max_fraction": 0.10,
+      "curriculum_ordering": "EXPERIMENT-3"
+    },
+
+    "stage_2": {
+      "teacher_model": "GPT-4o_or_Claude_Opus_4.8",
+      "scenario_count": 50000,
+      "reasoning_format": "sentinel_only_compressed_traces",
+      "verbose_NL_CoT_in_training_signal": false
+    },
+
+    "stage_3": {
+      "loss": "BaNEL_contrastive_KL_divergence",
+      "lambda_contrastive": 0.3,
+      "lambda_anneal_from": 0.1,
+      "lambda_anneal_epochs": 5,
+      "policy_gradient_RL_used": false,
+      "gradient_receivers": "DCAT_blocks"
+    },
+
+    "stage_4": {
+      "dpo_beta": 0.1,
+      "platform_annotation": "Argilla",
+      "platform_validation": "evtx_sigma_checker",
+      "decoder_separate_dpo_pass": true
+    },
+
+    "synthetic_flywheel": {
+      "simulators": ["MATRIX", "Caldera", "Atomic_Red_Team"],
+      "ip_range": "RFC1918_only",
+      "entity_names": "anonymized_consistent_within_scenario",
+      "stages_fed": [1, 3]
+    }
+  },
+
+  "success_criteria": {
+    "ATT&CK_stage_F1_DARPA_OpTC": { "target": 0.87, "baseline_SecureBERT2": 0.71 },
+    "ECL_state_macro_F1": { "target": 0.91 },
+    "CVSS_per_metric_accuracy": { "target": 0.95, "baseline_CVSS_BERT": 0.89 },
+    "inference_latency_ms_4096_tokens_no_decoder": { "target": 120 },
+    "ECE_OOD": { "target": 0.04 },
+    "AFN_overhead_ms": { "target": 15 },
+    "swarm_safety_parity_exact_ECL_match": { "target": 0.90, "scenario_count": 200, "baseline": "3_agent_GPT4o_mini_Themis" },
+    "decoder_latency_ms_additional": { "target": 50 }
+  },
+
+  "evaluation": {
+    "baselines": [
+      "SecureBERT_2.0_Cisco_ModernBERT_150M",
+      "Foundation_Sec_8B_Cisco",
+      "GPT_4o_zero_shot",
+      "Splunk_SIEM_rule_correlation",
+      "3_agent_orchestrated_swarm_GPT4o_mini_Themis"
+    ],
+    "benchmark_datasets": [
+      "DARPA_OpTC",
+      "DARPA_Transparent_Computing",
+      "LiveCVEBench_190_tasks",
+      "LANL_Auth_Dataset",
+      "UNSW_NB15",
+      "MITRE_ATT&CK_Evaluations_Round5_Carbanak_FIN7",
+      "CMU_CERT_Insider_Threat_v6.2",
+      "SigmaHQ_held_out_20pct"
+    ],
+    "probing_classifier_checkpoints": ["end_of_Stage_2", "end_of_Stage_4"]
+  },
+
+  "experiments_blocking_implementation": {
+    "EXPERIMENT-1": {
+      "blocks": ["dcat_window_N", "latency_budget_section_10"],
+      "variable": "DCAT_baseline_window_N",
+      "sweep": [32, 64, 128, 256, 512],
+      "success_FNR_max": 0.08,
+      "success_VRAM_max_GB": 40,
+      "success_latency_overhead_max_ms": 15
+    },
+    "EXPERIMENT-2": {
+      "blocks": ["kill_chain_state_tracking", "reasoning_representation", "ecl_classifier", "full_training_schedule"],
+      "variables": ["multi_task_loss_stability", "head_group_probing_convergence"],
+      "success_F1_drop_max_after_epoch5": 0.03
+    },
+    "EXPERIMENT-3": {
+      "blocks": ["stage_1_curriculum_order", "darpa_optc_subsampling_strategy"],
+      "arms": { "A": "isolated_node_first_50pct_then_full_graph", "B": "full_graph_from_epoch_1" },
+      "success_arm_A_advantage_F1": 0.05,
+      "checkpoint_epochs": [5, 10, 15]
+    }
+  },
+
+  "integration": {
+    "argus_xdr": {
+      "runtime": "ONNX_Runtime_v1.18_plus",
+      "language_binding": "onnxruntime_go",
+      "onnx_opset": 17,
+      "encoder_fusion_graph": "sf_encoder_fusion.onnx",
+      "decoder_graph": "sf_decoder.onnx",
+      "quantization_encoder": "INT8_post_training",
+      "quantization_decoder": "FP16",
+      "max_events_per_call": 512,
+      "max_rag_nodes_before_sampling": 1024,
+      "rag_node_sample_k": 256,
+      "rag_sampling_method": "degree_centrality_top_k"
+    },
+    "kairos_ecl_confidence_mapping": [
+      { "model_pred": "ACT",      "confidence_min": 0.85, "ecl_output": "ACT" },
+      { "model_pred": "ESCALATE", "confidence_min": 0.85, "ecl_output": "ESCALATE" },
+      { "model_pred": "ACT",      "confidence_range": [0.65, 0.84], "ecl_output": "ESCALATE", "note": "downgrade" },
+      { "model_pred": "ESCALATE", "confidence_range": [0.65, 0.84], "ecl_output": "ESCALATE_uncertainty_flag" },
+      { "model_pred": "ANY",      "confidence_range": [0.40, 0.64], "ecl_output": "DEFER" },
+      { "model_pred": "ANY",      "confidence_max": 0.40, "ecl_output": "FAIL_SAFE" },
+      { "trigger": "DCAT_D_gt_theta_and_not_ACT_or_ESCALATE", "ecl_output": "ESCALATE" },
+      { "trigger": "RAG_unavailable", "ecl_output": "FAIL_SAFE" }
+    ],
+    "themis": {
+      "securefoundation_role": "synchronous_analytical_oracle",
+      "securefoundation_calls_external_tools": false,
+      "securefoundation_spawns_subagents": false,
+      "securefoundation_maintains_session_state": false,
+      "decoder_trace_injection_back_to_sf": false,
+      "themis_receives": ["ecl_state", "evidence_chain", "technique_ids", "afn_scores", "decoder_trace_if_requested"]
+    }
+  },
+
+  "data_schema": {
+    "schema_version": "1.0",
+    "minimum_required_fields": ["domain", "input_events_min_1", "expected_ecl_state"],
+    "optional_fields_for_stage_3": ["null_signals", "provenance_graph"],
+    "optional_fields_for_stage_2": ["reasoning_trace"],
+    "pii_scan_required": true,
+    "real_public_ips_allowed": false,
+    "real_hostnames_with_org_identifiers_allowed": false,
+    "sigma_rule_validation_toolchain": "evtx_sigma_checker",
+    "dpo_annotation_platform": "Argilla",
+    "license_required": "Apache-2.0"
+  },
+
+  "huggingface_org": "secureaifoundation",
+
+  "open_risks": {
+    "moe_side_channel": "rejected_by_design_all_7_encoders_unconditional",
+    "ad_graph_vram_ceiling": "mitigated_by_argus_2hop_subgraph_plus_256_node_sampling",
+    "darpa_optc_scripted_bias": "mitigated_by_10pct_benign_subsample_plus_matrix_injection",
+    "rag_dependency_on_minimal_boundary": "mitigated_by_FAIL_SAFE_fallback_and_argus_cache",
+    "decoder_vocabulary_escape": "mitigated_by_logit_level_mask_plus_afn_cross_attn_restriction"
+  }
+}
