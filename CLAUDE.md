@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Repository Is
 
-A specification-and-lock repository for **SecureFoundation** — a security-native, ~1.16B parameter encoder-decoder transformer targeting sub-4B inference on a single GPU for real-time SOC operations. There is no application code yet. The three files here are the canonical source of truth that any implementation must conform to.
+A specification-and-lock repository for **Vajra** — a security-native, ~1.16B parameter encoder-decoder transformer targeting sub-4B inference on a single GPU for real-time SOC operations. There is no application code yet. The three files here are the canonical source of truth that any implementation must conform to.
 
 | File | Purpose |
 |------|---------|
-| `ARCHITECTURE.md` | Full implementation-ready spec (13 sections, all numeric targets, training pipeline, integration contracts) |
+| `ARCHITECTURE.md` | Full implementation-ready spec (13 sections, all numeric targets, training pipeline, platform-agnostic interface contract) |
 | `REQUIREMENTS.lock` | Machine-readable JSON of every locked decision, numeric value, and hard constraint extracted from the spec. Contains SHA-256 of `ARCHITECTURE.md` to detect drift. |
 | `validate_requirements.py` | Stdlib-only Python script that enforces compliance |
 
@@ -26,14 +26,11 @@ python validate_requirements.py --impl path/to/impl_config.json
 
 ## Architecture at a Glance
 
-**Seven parallel domain encoders** (Detection, Forensics, CTI, Vulnerability, Identity/Access, Incident Response, Compliance) run unconditionally and independently on every inference call — no shared weights, no cross-encoder attention. Each produces a single CLS token that feeds into a **6-block epistemic fusion layer** (F1–F6). The fusion layer performs cross-domain cross-attention and taps discrete Kairos ECL states (ACT/ESCALATE/DEFER/FAIL_SAFE) at F3 (fast exit) and F6 (full). A **constrained justification decoder** (8 layers) is invoked only for ACT/ESCALATE states; it cross-attends only over AFN-scored evidence tokens, never raw encoder states, and its vocabulary is hard-masked at logit level.
+**Seven parallel domain encoders** (Detection, Forensics, CTI, Vulnerability, Identity/Access, Incident Response, Compliance) run unconditionally and independently on every inference call — no shared weights, no cross-encoder attention. Each produces a single CLS token that feeds into a **6-block epistemic fusion layer** (F1–F6). The fusion layer performs cross-domain cross-attention and taps discrete decision state classifiers (4-class integer output) at F3 (fast exit) and F6 (full). A **constrained justification decoder** (8 layers) is invoked only for classes 0 and 1; it cross-attends only over AFN-scored evidence tokens, never raw encoder states, and its vocabulary is hard-masked at logit level.
 
-Input enters via three parallel tokenization paths all projecting to d=1024: S-TOON sentinel-bounded text, a numerical sub-tokenizer (CVSS, NetFlow — never BPE), and a graph-embedding pipeline (TransE/RotatE + GCN for MITRE; inference-time GCN for Argus RAG-provided graphs). Interpretability is via **Activation Flow Networks** (L2-norm of hidden states at the Layer-8 analog), not attention heatmaps.
+Input enters via three parallel tokenization paths all projecting to d=1024: S-TOON sentinel-bounded text, a numerical sub-tokenizer (CVSS, NetFlow — never BPE), and a graph-embedding pipeline (TransE/RotatE + GCN for MITRE; inference-time GCN for consuming-system RAG-provided graphs). Interpretability is via **Activation Flow Networks** (L2-norm of hidden states at the Layer-8 analog), not attention heatmaps.
 
-**Integration context:**
-- **Argus XDR** (Go backend): calls SecureFoundation via protobuf; provides RAG subgraphs; receives ECL state + evidence DAG + AFN scores
-- **Kairos ECL**: the four-state epistemic control layer that consumes SecureFoundation's classifier output
-- **Themis**: agentic orchestration layer; SecureFoundation is a synchronous oracle within Themis dispatch, not an agent itself
+**Interface:** Vajra exposes a platform-agnostic `VajraInferenceRequest` / `VajraInferenceResponse` Python dataclass interface (§10). Consuming systems (XDR platforms, SIEM integrations, agentic orchestrators) implement their own adapters. The model emits `decision_class` integer indices (0–3); consuming systems map these to their own state names.
 
 ## The Lock Workflow
 
@@ -53,8 +50,8 @@ These must be settled empirically before the relevant implementation sections ar
 
 | ID | What it resolves | Key variable |
 |----|-----------------|-------------|
-| EXPERIMENT-1 | DCAT baseline window N (§4.3) and latency budget (§10.1) | Sweep N ∈ {32,64,128,256,512} events; target FNR ≤ 0.08, VRAM < 40GB |
-| EXPERIMENT-2 | Multi-task training stability of fusion + kill-chain state + ECL (§4.4, §5, §8) | F1 drop across all three objectives must stay ≤ 0.03 after epoch 5 |
+| EXPERIMENT-1 | DCAT baseline window N (§4.3) and latency budget (§10.3) | Sweep N ∈ {32,64,128,256,512} events; target FNR ≤ 0.08, VRAM < 40GB |
+| EXPERIMENT-2 | Multi-task training stability of fusion + kill-chain state + decision state classifier (§4.4, §5, §8) | F1 drop across all three objectives must stay ≤ 0.03 after epoch 5 |
 | EXPERIMENT-3 | Curriculum ordering for DARPA OpTC pretraining (§8.1) | Isolated-node-first vs. full-graph-from-epoch-1 |
 
 ## Hard Constraints (Non-Negotiable)
@@ -65,6 +62,6 @@ These are encoded in `REQUIREMENTS.lock` under `hard_constraints` and checked by
 - No exploit synthesis in weights; no free-text attack-tooling output
 - Decoder vocabulary mask enforced at logit level (`p = −∞`), not sampling level
 - No real IP addresses in training data (RFC1918 and RFC5737 documentation ranges only)
-- ECL state markers emitted at F3 and F6 tap points on every inference call
+- Decision state markers emitted at F3 and F6 tap points on every inference call
 - AFN (not raw attention weights) for all interpretability surfaces
 - Apache 2.0 license on all weights, code, and training data

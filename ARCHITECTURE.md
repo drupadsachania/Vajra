@@ -1,9 +1,11 @@
-# SecureFoundation — Architecture Specification
+# Vajra — Architecture Specification
+*A security-native foundation model. Built in India.*
 
 **Version:** 1.0  
 **License:** Apache 2.0  
-**Status:** Implementation-ready  
-**Operator decisions locked:** 2026-06-07  
+**Status:** Implementation-ready — pending Experiment Register resolution (§12)
+**Architecture locked:** 2026-06-07
+**Repository:** github.com/vajra-foundation/vajra
 
 ---
 
@@ -15,14 +17,14 @@ rejected. Read this first.
 | # | Decision | Chosen | Finding | Alternatives Rejected |
 |---|----------|--------|---------|----------------------|
 | 0-1 | Fusion architecture | **Parallel domain-specific encoders → epistemic fusion at final layer** | Architecture Decision Input #1: MoE sparse routing produces measurable GPU side-channel footprints and obfuscates which sub-network drove the epistemic conclusion | Dense early-fusion cross-attention; Mixture-of-Experts (MoE) |
-| 0-2 | Output architecture | **T5-style encoder-decoder with constrained justification decoder** | Architecture Decision Input #2: encoder-only lacks autoregressive capability for analyst-readable kill-chain traces; latent CoT yields probing inconsistency incompatible with ECL tap requirement | Encoder-only; latent CoT (CoLaR/Coconut) |
+| 0-2 | Output architecture | **T5-style encoder-decoder with constrained justification decoder** | Architecture Decision Input #2: encoder-only lacks autoregressive capability for analyst-readable kill-chain traces; latent CoT yields probing inconsistency incompatible with depth-tapped decision state requirement | Encoder-only; latent CoT (CoLaR/Coconut) |
 | 0-3 | Tokenization | **Modular multi-tokenizer: numerical sub-tokenizer + graph-embedding pipeline + S-TOON sentinel-bounded text tokenizer → shared d=1024** | Architecture Decision Input #3; Gap: Unified Multimodal Tokenization Paradox; Confirmed Borrowing: S-TOON | Universal BPE; single-modality text tokenizer |
-| 0-4 | Knowledge boundary | **MITRE tactic/technique embeddings baked in (14 tactics, ~700 techniques); all CVE data, D3FEND, identity graphs, live threat intel via Argus RAG** | Architecture Decision Input #4 (operator chose minimal baked-in boundary); Confirmed Borrowing: Ontological KG Embeddings | Larger static KG including CVE/D3FEND baked in; fully RAG-dependent at inference |
+| 0-4 | Knowledge boundary | **MITRE tactic/technique embeddings baked in (14 tactics, ~700 techniques); all CVE data, D3FEND, identity graphs, live threat intel via consuming system's RAG** | Architecture Decision Input #4 (operator chose minimal baked-in boundary); Confirmed Borrowing: Ontological KG Embeddings | Larger static KG including CVE/D3FEND baked in; fully RAG-dependent at inference |
 | 0-5 | Interpretability method | **Activation Flow Networks (AFN): L2-norm hidden-state importance at intermediate layers** | Surprise #1: "attention is not explanation" — raw attention maps highlight syntactic delimiters, not causal tokens; AFN provides mathematically provable input→output links | Raw attention heatmaps |
 | 0-6 | Absence/null-state reasoning | **Dual-Contrastive Attention (DCAT) + BaNEL contrastive loss** | Confirmed Borrowing: DCAT; Surprise #3: standard RL on null rewards produces zero gradients and collapses to random search | Standard self-attention; policy-gradient RL |
 | 0-7 | Temporal encoding | **Continuous-time encoding (ContiFormer/TFT): time as continuous variable, learnable frequencies** | Confirmed Borrowing: Continuous-Time / TFT — discrete sinusoidal indices treat ms-apart and month-apart events as equally adjacent | Discrete sinusoidal positional embedding; learned relative position |
 | 0-8 | Ontological knowledge representation | **TransE + RotatE + GCN on MITRE ATT&CK graph; embeddings frozen after Stage 1** | Confirmed Borrowing: Ontological KG Embeddings — TransE/RotatE capture relational translation semantics; GCN captures local structural dependencies | Inference-time RAG for static MITRE facts; hand-coded rule embeddings |
-| 0-9 | Reasoning output style | **Discrete ECL markers at depth-tapped fusion layers; no latent CoT** | Gap: Interpretable Latent CoT (probing inconsistency); Surprise #2: small models punish verbose CoT — sentinel-only markers outperform NL deliberation | Verbose NL chain-of-thought; depth-recurrent latent states |
+| 0-9 | Reasoning output style | **Discrete decision state markers at depth-tapped fusion layers; no latent CoT** | Gap: Interpretable Latent CoT (probing inconsistency); Surprise #2: small models punish verbose CoT — sentinel-only markers outperform NL deliberation | Verbose NL chain-of-thought; depth-recurrent latent states |
 | 0-10 | MoE routing | **Rejected** | Architecture Decision Input #1: sparse routing produces GPU execution-telemetry side-channel observable non-intrusively; routing obfuscates epistemic attribution | N/A |
 
 ---
@@ -31,15 +33,18 @@ rejected. Read this first.
 
 ### 1.1 Purpose
 
-SecureFoundation is a security-native encoder-decoder transformer that accepts heterogeneous
+Vajra is a security-native encoder-decoder transformer that accepts heterogeneous
 cybersecurity telemetry from seven security domains in a single inference call, produces discrete
-epistemic state markers mapped to the Kairos ECL (ACT / ESCALATE / DEFER / FAIL_SAFE),
-calibrated confidence scores, ATT&CK technique classifications, evidence-chain DAGs, and
-human-auditable activation-flow justification traces.
+decision state classifications, calibrated confidence scores, ATT&CK technique classifications,
+evidence-chain DAGs, and human-auditable activation-flow justification traces.
 
-It is designed to operate within the Argus XDR environment: Argus provides dynamic threat
-intelligence via RAG; SecureFoundation provides the analytical inference layer. Themis uses
-SecureFoundation's ECL state output as a dispatch signal for downstream agentic actions.
+Vajra is designed to be deployed by any security operations platform that can
+provide structured telemetry input and consume structured JSON output. The model
+does not depend on any specific XDR, SIEM, or orchestration platform. RAG context
+(CVE records, threat intel, asset graphs) is provided at inference time by the
+consuming system via the graph input fields. Agentic orchestration layers use
+Vajra's `decision_class` output and `justification_trace` as signals for downstream
+actions.
 
 ### 1.2 The Seven Domains
 
@@ -58,12 +63,12 @@ SecureFoundation's ECL state output as a dispatch signal for downstream agentic 
 - Not a generative attack-tooling model. No output head produces exploit code, attack scaffolding, or
   reconnaissance instructions. This constraint is structural, not policy: the decoder vocabulary is
   hard-masked at logit level.
-- Not a replacement for a Tier-3 analyst. SecureFoundation produces discrete state and evidence; the
+- Not a replacement for a Tier-3 analyst. Vajra produces discrete state and evidence; the
   analyst acts.
 - Not a general-purpose LLM. Domain encoders are trained exclusively on security telemetry.
-- Not an orchestration engine. Themis orchestrates; SecureFoundation infers.
-- Not a replacement for Argus's rule engine. Sigma rule matching remains in Argus; SecureFoundation
-  receives matched-event output as input.
+- Not an orchestration engine. Agentic orchestration layers dispatch actions; Vajra infers.
+- Not a replacement for a rule engine. Sigma rule matching and alert triage remain in the
+  consuming platform; Vajra receives matched-event output as input.
 
 ### 1.4 Core Thesis: Monolith Rivaling Multi-Agent Swarm Safety
 
@@ -71,7 +76,7 @@ The most advanced deployed security AI systems (CrowdStrike Charlotte AI, Palo A
 Microsoft Security Copilot) deliberately fracture reasoning into siloed agents to isolate logic,
 prevent cross-domain hallucination, and enforce authorization controls [Finding: Surprise #4].
 
-SecureFoundation achieves equivalent safety guarantees within a monolithic architecture via
+Vajra achieves equivalent safety guarantees within a monolithic architecture via
 **rigid parallel stream isolation:**
 
 - Each of the seven domain encoders is a completely independent parameter namespace. No weights
@@ -94,13 +99,13 @@ These constraints are implemented in the model code, not in policy. A prompt can
 | Metric | Target | Baseline |
 |--------|--------|---------|
 | ATT&CK stage attribution F1 on DARPA OpTC | ≥ 0.87 | SecureBERT 2.0: ~0.71 |
-| Kairos ECL state macro F1 (4-class) | ≥ 0.91 | No published baseline |
+| Decision state macro F1 (4-class) | ≥ 0.91 | No published baseline |
 | CVSS per-metric classification accuracy | ≥ 0.95 | CVSS-BERT: ~0.89 |
 | Mean inference latency (4096-token input, single A100 80GB) | ≤ 120 ms | — |
 | Expected Calibration Error (ECE) on OOD distribution | ≤ 0.04 | — |
 | AFN trace generation overhead | ≤ 15 ms | — |
-| Swarm-safety parity: ECL state exact-match vs. 3-agent baseline | ≥ 90% on 200 DARPA OpTC scenarios | — |
-| Decoder trace generation latency (ACT/ESCALATE only) | ≤ 50 ms additional | — |
+| Swarm-safety parity: decision state exact-match vs. 3-agent baseline | ≥ 90% on 200 DARPA OpTC scenarios | — |
+| Decoder trace generation latency (classes 0–1 only) | ≤ 50 ms additional | — |
 
 ---
 
@@ -145,13 +150,12 @@ applied only to natural-language string values inside sentinel-delimited spans.
 | `<\|S_LDAP\|>` | Schema type: LDAP / directory object |
 | `<\|S_BASELINE\|>` | DCAT dual-stream: baseline state marker |
 | `<\|S_OBSERVED\|>` | DCAT dual-stream: observed state marker |
-| `<\|ECL_ACT\|>` | Kairos ECL output (decoder only) |
-| `<\|ECL_ESCALATE\|>` | Kairos ECL output (decoder only) |
-| `<\|ECL_DEFER\|>` | Kairos ECL output (decoder only) |
-| `<\|ECL_FAIL_SAFE\|>` | Kairos ECL output (decoder only) |
 
-The four `<\|ECL_*\|>` tokens appear in decoder output vocabulary only; they are masked from
-encoder input paths.
+The four `<|ECL_*|>` tokens have been removed from the vocabulary. The decision state
+classification head (Section 6.3) outputs a 4-class logit vector over integer class indices
+{0, 1, 2, 3}. The semantic mapping of these indices to named decision states is the
+responsibility of the consuming system. Vajra has no knowledge of how the consuming system
+names or acts on these states.
 
 **Projection:** Path A output is already in d=1024 via the shared token embedding matrix.
 
@@ -197,7 +201,7 @@ One-hot encode each component → concatenate (total dim = 25) → MLP(25 → 51
 ### 2.3 Path C — Graph-Embedding Pipeline
 
 **Scope:** MITRE ATT&CK tactic/technique nodes (baked into weights at pretraining), and
-inference-time subgraphs provided by Argus XDR (AD topology fragments, asset dependency
+inference-time subgraphs provided by the consuming system (AD topology fragments, asset dependency
 graphs, CVE-to-asset linkages).
 
 **Baked-in (MITRE only):**  
@@ -213,8 +217,8 @@ technique nodes, ~400 sub-technique nodes, procedural edges: `prerequisite_for`,
 - Any input token whose text matches an ATT&CK technique ID (e.g., `T1003`) has its baked MITRE
   embedding added to its token embedding (see Section 3)  
 
-**RAG-provided (Argus, inference-time):**  
-Argus returns `rag_nodes` and `rag_edges` per request (see Section 10 protobuf contract).  
+**RAG-provided (inference-time):**  
+The consuming system provides `graph_nodes` and `graph_edges` per request (see §10.1 input contract).  
 - If subgraph size > 1,024 nodes: apply top-k degree-centrality node sampling, k=256, before GCN  
 - 2-layer GCN (d_graph=512, unfrozen) encodes the subgraph; Graphormer structural features
   (centrality encoding, degree encoding, shortest-path bias) concatenated before projection  
@@ -302,7 +306,7 @@ Path: A for user/host entities; B for categorical auth fields and timestamps
 Record: 1234567890,U10@DOM1,U10@DOM1,C1,C2,Kerberos,Network,LogOn,Success
 
 Timestamp → ContiFormer continuous-time encoding
-src_user U10@DOM1 → BPE within <|S_VAL|>; if identity graph provided by Argus,
+src_user U10@DOM1 → BPE within <|S_VAL|>; if identity graph provided by consuming system,
                      also Path C GCN node lookup
 AuthType=Kerberos → Path B categorical (6 auth type values)
 LogonType=Network → Path B categorical
@@ -324,9 +328,9 @@ e_final(i) = LayerNorm( E_token(i) + E_source_type(i) + E_temporal(i) + E_ontolo
 
 ### 3.1 Token Embeddings
 
-- Vocabulary size: 50,432  
+- Vocabulary size: 50,428  
   = 50,000 BPE tokens (trained on security corpora, not internet text)  
-  + 24 sentinel tokens (Section 2.1)  
+  + 20 sentinel tokens (Section 2.1)  
   + 8 ATT&CK technique atomic tokens (`T1003`, `T1021`, `T1078`, `T1059`, `T1055`, `T1047`, `T1071`, `T1083`)  
   + ~400 remaining ATT&CK technique IDs as atomic tokens (guaranteed single-token, prevent BPE fragmentation of technique IDs)  
 - Embedding matrix: 50,432 × 1024 → ~52M parameters  
@@ -403,9 +407,9 @@ any token position i whose vocabulary ID maps to a known ATT&CK tactic or techni
 other tokens, E_ontology(i) = 0.
 
 The operator's knowledge boundary decision: only MITRE tactics/techniques are baked; CVE data,
-D3FEND mitigations, identity graph topology, and threat actor profiles are retrieved from Argus XDR
-at inference time via Path C's inference-time GCN. This maximizes knowledge freshness at the cost
-of RAG latency dependency (see Risk 4 in Section 13).
+D3FEND mitigations, identity graph topology, and threat actor profiles are retrieved from the
+consuming system's RAG pipeline at inference time via Path C's inference-time GCN. This maximizes
+knowledge freshness at the cost of RAG latency dependency (see Risk 4 in Section 13).
 
 ---
 
@@ -424,7 +428,7 @@ epistemic layer]
 | CTI/STIX | 8 | 768 | 12 | 3072 | ~85M | Highly structured, standardized; SecureBERT 2.0 precedent demonstrates 150M encoder is sufficient for CTI NER [Finding: Domain Data Inventory — CTI usability 5/5; Key Reference: SecureBERT 2.0] |
 | Vulnerability/Risk | 8 | 768 | 12 | 3072 | ~85M | 200K+ CVEs, CVSS structure reduces required representational depth [Finding: Domain Data Inventory — Vulnerability usability 4/5] |
 | Identity/Access | 6 | 768 | 12 | 3072 | ~65M | Data-sparse domain; oversized encoder will overfit to synthetic UEBA data [Finding: Domain Data Inventory — Identity usability 2/5] |
-| Incident Response | 6 | 768 | 12 | 3072 | ~65M | Data-sparse; ground-truth ECL labels almost entirely crowdsourced or synthetic [Finding: Domain Data Inventory — IR usability 2/5] |
+| Incident Response | 6 | 768 | 12 | 3072 | ~65M | Data-sparse; ground-truth decision state labels almost entirely crowdsourced or synthetic [Finding: Domain Data Inventory — IR usability 2/5] |
 | Compliance | 4 | 512 | 8 | 2048 | ~28M | Structural control matching; no deep sequential reasoning required [Finding: Domain Data Inventory — Compliance usability 3/5, disconnected from live telemetry] |
 
 **All domain encoders share:**
@@ -492,10 +496,10 @@ DCAT_block(X, B):
   (host ID or user ID, resolved from the domain routing tag)  
 - `B` is stored in a per-entity KV cache, separate from the primary sequence KV cache; it consumes
   no context window tokens from the model's sequence budget  
-- `B` is updated with EMA coefficient β=0.9 after each inference call where ECL state ∈
-  {DEFER, ACT} (non-anomalous baseline)  
-- `B` is frozen (not updated) when ECL state = ESCALATE or FAIL_SAFE, preserving the pre-anomaly
-  baseline  
+- `B` is updated with EMA coefficient β=0.9 after each inference call where `decision_class` ∈
+  {2, 0} (non-anomalous: DEFER or HIGH_CONFIDENCE_ACTION)
+- `B` is frozen (not updated) when `decision_class` ∈ {1, 3} (ESCALATE_FOR_REVIEW or
+  INSUFFICIENT_CONTEXT), preserving the pre-anomaly baseline  
 - When an expected field is absent (a `<|S_NULL|>` sentinel appears at a position where a non-null
   token was expected per the schema type): D_divergence is guaranteed to be high by construction,
   because the baseline expects a present token and the observed stream delivers absence  
@@ -517,11 +521,12 @@ entities simultaneously. See Section 12 for experiment design. [Finding: Open Qu
 - Bidirectional cross-attention (each domain CLS can attend to all other domain CLS tokens)
 - Parameter budget: ~100M
 
-**ECL tap points:**
-- **F3 fast tap:** After fusion block F3, a linear head Linear(1024 → 4) produces a preliminary ECL
-  state. If confidence(DEFER) > 0.92 OR confidence(FAIL_SAFE) > 0.85, inference short-circuits
-  here (early exit). This eliminates fusion F4–F6 FLOPs for clear low-confidence inputs.
-- **F6 full tap:** After fusion block F6, the primary ECL state, ATT&CK classification, and
+**Decision state tap points:**
+- **F3 fast tap:** After fusion block F3, a linear head Linear(1024 → 4) produces a preliminary
+  decision state. If confidence(class=2) > 0.92 OR confidence(class=3) > 0.85, inference
+  short-circuits here (early exit). This eliminates fusion F4–F6 FLOPs for clear low-confidence
+  inputs.
+- **F6 full tap:** After fusion block F6, the primary decision state, ATT&CK classification, and
   evidence-chain DAG are computed.
 
 **Kill-chain state tracking (LEGO-style semiautomaton):**  
@@ -540,7 +545,7 @@ is maintained as a register tensor throughout the fusion layer:
   7-dim binary vector, giving the fusion layer explicit state-tracking context
 
 **EXPERIMENT-2:** Whether jointly optimizing (a) continuous cross-domain fusion attention, (b)
-discrete kill-chain state tracking, and (c) discrete ECL state output is mathematically stable
+discrete kill-chain state tracking, and (c) discrete decision state output is mathematically stable
 and converges without objective conflict is unexplored in the security domain. See Section 12.
 [Finding: Open Question #1]
 
@@ -560,10 +565,10 @@ discrete epistemic markers.
 - Small models (≤4B) actively punish verbose natural language CoT: forcing explicit verbal reasoning
   over structured protocols introduces severe instability, hallucinations, and unacceptable latency
   [Finding: Surprise #2]
-- Kairos ECL requires deterministic discrete state markers at specific layer depths, which is
+- Deterministic discrete state markers are required at specific layer depths, which is
   structurally incompatible with non-deterministic recurrence depth
 
-**Chosen approach: Depth-segmented latent reasoning with discrete ECL tap points.**
+**Chosen approach: Depth-segmented latent reasoning with discrete decision state tap points.**
 
 The cross-domain causal chain (Detection → Identity → Vulnerability → IR) is processed as a
 continuous cross-domain cross-attention operation in the fusion layer (F1–F6). No explicit
@@ -571,13 +576,13 @@ reasoning tokens are emitted during this process. The kill-chain state machine (
 provides a discrete representational scaffold that tracks APT stage transitions without
 generating natural language.
 
-Discrete ECL markers are extracted at two fusion layer depths (F3 fast, F6 full) via linear
-classification heads. The constrained decoder (Section 6) is invoked separately and only on
-analyst request.
+Discrete decision state markers are extracted at two fusion layer depths (F3 fast, F6 full) via
+linear classification heads. The constrained decoder (Section 6) is invoked separately and only
+on analyst request.
 
 **No latent CoT is implemented.** Hidden-state recycling is excluded because:
-1. Probing inconsistency makes ECL tap points non-deterministic [Finding: Gap: Interpretable Latent CoT]
-2. Kairos ECL requires deterministic discrete outputs [Hard Constraint: must emit discrete ECL markers]
+1. Probing inconsistency makes decision state tap points non-deterministic [Finding: Gap: Interpretable Latent CoT]
+2. Deterministic discrete state outputs are a hard architectural requirement [Hard Constraint: must emit discrete decision state markers]
 3. Small model CoT penalty [Finding: Surprise #2]
 
 ### 5.2 Cross-Domain Causal Chain Representation
@@ -624,15 +629,29 @@ state tracking objective described in Section 4.4, not as a separate module.
   validation set)
 - **Training:** Binary cross-entropy with label smoothing ε=0.1
 
-### 6.3 Kairos ECL State Classifier
+### 6.3 Decision State Classifier
 
 - **Architecture:** Linear(1024 → 4) applied at both F3 (fast) and F6 (full) tap points
-- **Output:** Softmax over {ACT=0, ESCALATE=1, DEFER=2, FAIL_SAFE=3}
-- **Early exit rule:** If F3 confidence(DEFER) > 0.92 or confidence(FAIL_SAFE) > 0.85 → return
-  F3 classification without computing F4–F6 or Head 6.4
-- **DCAT override:** If DCAT divergence D > θ_divergence in any encoder and no classification was
-  already ESCALATE or ACT: force output to ESCALATE
+- **Output:** Softmax over 4 decision classes {0=HIGH_CONFIDENCE_ACTION,
+  1=ESCALATE_FOR_REVIEW, 2=DEFER, 3=INSUFFICIENT_CONTEXT}. Class names are
+  semantic labels internal to this spec for clarity; the model emits integer class
+  indices and calibrated probabilities. Consuming systems map indices to their own
+  state names.
+- **Early exit rule:** If F3 confidence(class=2) > 0.92 OR confidence(class=3) > 0.85
+  → return F3 classification without computing F4–F6 or output head 6.4
+- **DCAT override:** If DCAT divergence D > θ_divergence in any encoder and current
+  classification is not class 0 or 1: force output to class 1
 - **Training:** Cross-entropy on DPO-annotated preference pairs (Stage 4)
+- **Output contract:**
+  ```json
+  {
+    "decision_class": 0,
+    "decision_probabilities": [0.87, 0.09, 0.03, 0.01],
+    "confidence": 0.87,
+    "early_exit": false,
+    "dcat_override": false
+  }
+  ```
 
 ### 6.4 Calibrated Confidence Scorer
 
@@ -644,9 +663,9 @@ state tracking objective described in Section 4.4, not as a separate module.
   Log-Likelihood (NLL) on OOD set
 - **Additionally:** Conformal prediction sets computed offline at p=0.90 and p=0.95 coverage
   levels on the calibration set; these provide deployment-time coverage guarantees — the
-  conformal set answers "which ECL states are plausible at 90% confidence" rather than a
-  single argmax
-- **Output:** Scalar confidence ∈ [0,1] + optional conformal prediction set of valid ECL states
+  conformal set answers "which decision classes are plausible at 90% confidence" rather than
+  a single argmax
+- **Output:** Scalar confidence ∈ [0,1] + optional conformal prediction set of valid decision classes
 
 ### 6.5 Constrained Justification Decoder
 
@@ -659,19 +678,18 @@ state tracking objective described in Section 4.4, not as a separate module.
   states; it can only attend to the pre-scored, AFN-filtered evidence set.
 - **Vocabulary constraint:** The output vocabulary is constrained at inference via hard logit
   masking (p = −∞ for blocked tokens) to:
-  - **Allowed:** Domain-specific security terminology, ATT&CK technique IDs, Kairos ECL state
-    tokens, structured causal connectives ("because", "triggered by", "correlated with",
-    "absent", "indicates", "followed by"), anonymized entity references (e.g., HOST_A, USER_B)
+  - **Allowed:** Domain-specific security terminology, ATT&CK technique IDs, native tool call
+    JSON tokens (§10.6), structured causal connectives ("because", "triggered by", "correlated
+    with", "absent", "indicates", "followed by"), anonymized entity references (e.g., HOST_A, USER_B)
   - **Blocked:** All tokens in the OffSec vocabulary block list (exploit tool names, shellcode
     keywords, payload scaffolding terms); real IP addresses outside RFC1918/documentation
-    ranges; free-form natural language instructions; any token from the 24 sentinel token set
-    except ECL output tokens
+    ranges; free-form natural language instructions; any token from the 20 sentinel token set
 - **Max output length:** 256 tokens, enforced by truncating decoder positional embeddings at
   position 256
-- **Invocation condition:** The decoder is called **only** when ECL state ∈ {ACT, ESCALATE}
-  AND the requesting system (Argus/Themis) sets `request_decoder_trace = true`. It is not
-  called on DEFER or FAIL_SAFE. This eliminates decoder latency for the majority of inference
-  calls.
+- **Invocation condition:** The decoder is called **only** when `decision_class` ∈ {0, 1}
+  (HIGH_CONFIDENCE_ACTION or ESCALATE_FOR_REVIEW) AND `request_justification_trace=True`.
+  It is not called for classes 2 or 3. This eliminates decoder latency for the majority of
+  inference calls.
 - **Freeze policy:** Decoder weights are frozen during domain-specific fine-tuning. Only updated
   during Stage 4 DPO alignment via a separate decoder DPO pass.
 - **Safety note:** The vocabulary mask is applied at the logit computation step before sampling —
@@ -719,16 +737,22 @@ input contribution. Unlike attention weights, it cannot be trivially manipulated
 downstream tokens, and it maintains uniqueness: different inputs produce distinguishably different
 L2-norm profiles.
 
-### 7.2 Surfacing AFN Output to Tier-3 Analysts
+### 7.2 Surfacing AFN Output to Analysts
 
-- Argus XDR renders AFN scores as a ranked field-importance table in the incident UI: field name,
-  source domain, importance score, raw value
-- The constrained decoder's justification trace is presented alongside, with each sentence
-  annotated with which AFN-scored fields drove it (the cross-attention source mapping is logged)
-- Both artifacts are appended to the incident audit trail in the Argus event log, timestamped and
-  cryptographically signed for compliance chain-of-custody requirements
-- The evidence-chain DAG (Section 6.1) is rendered as a provenance graph overlay in the Argus
-  timeline view
+AFN scores are returned in the `afn_scores` field of `VajraInferenceResponse`
+as a ranked list of top-16 input fields by L2-norm importance. Consuming systems
+are responsible for rendering these for analysts. The recommended presentation:
+
+- A ranked field-importance table: field name, source domain, score, raw value
+- The justification trace (if requested) annotated with which AFN-scored fields
+  drove each sentence — the cross-attention source mapping is included in the
+  decoder's attention metadata
+- The evidence-chain DAG rendered as a provenance graph
+
+The `afn_scores` field provides sufficient information for any consuming system
+to implement analyst-facing interpretability UI without further model calls.
+Chain-of-custody logging and cryptographic signing of inference outputs are the
+responsibility of the consuming system.
 
 ### 7.3 Probing Classifier Regime
 
@@ -761,7 +785,7 @@ Probing classifiers validate that head groups do what they were designed to do. 
 | Threat Intelligence | MITRE ATT&CK, MISP galaxies, APTnotes, CTI report corpora | ~25,000 instruction-response pairs (SecureBERT 2.0 derived) + MITRE Enterprise matrix | 5/5 | 20% | Highest quality; full weight |
 | Vulnerability/Risk | NVD, CVE datasets, LiveCVEBench, ExploitDB | ~200,000+ CVEs; 190 agentic tasks | 4/5 | 15% | Penalize outdated exploitability context; upweight LiveCVEBench executable tasks |
 | Identity/Access | LANL Auth Dataset, CMU CERT Insider Threat | Hundreds of millions of auth events | 2/5 | 10% | Heavy synthetic augmentation via MATRIX; localized behavioral baselines only |
-| Incident Response | CISA Advisories, FBI Flash Alerts, Open Source Playbooks | Thousands of reports; limited structured playbooks | 2/5 | 5% | Almost entirely synthetic; ground-truth ECL labels from DPO only |
+| Incident Response | CISA Advisories, FBI Flash Alerts, Open Source Playbooks | Thousands of reports; limited structured playbooks | 2/5 | 5% | Almost entirely synthetic; ground-truth decision state labels from DPO only |
 | Compliance | CIS Benchmarks, NIST 800-53, ISO 27001 | Thousands of control definitions | 3/5 | 5% | Structural only; synthetic EDR→compliance gap mappings generated by MATRIX |
 
 **Pretraining objectives:**
@@ -804,16 +828,16 @@ names anonymized.
    - `domain_triggered`: list of involved domains
    - `technique_identified`: list of ATT&CK technique IDs
    - `evidence_fields`: list of input field references
-   - `ecl_state`: one of ACT/ESCALATE/DEFER/FAIL_SAFE
+   - `decision_class`: integer 0|1|2|3
    - `confidence_rationale`: single terse sentence
 3. Compressed output is re-encoded as a sentinel-only trace:
    ```
    <|S_DOMAIN:detection|><|S_DOMAIN:identity|><|S_START|>
    <|S_KEY|>technique<|S_VAL|>T1003<|S_KEY|>technique<|S_VAL|>T1021
    <|S_KEY|>evidence<|S_VAL|>EventID_4688<|S_KEY|>evidence<|S_VAL|>LogonType_3
-   <|ECL_ESCALATE|><|S_END|>
+   <|S_KEY|>decision_class<|S_VAL|>1<|S_END|>
    ```
-4. Student (SecureFoundation) is trained via cross-entropy on these compressed traces
+4. Student (Vajra) is trained via cross-entropy on these compressed traces
 
 **Verbose NL CoT is explicitly excluded** from the training signal [Finding: Surprise #2 — small
 models actively punish verbose reasoning; studies on 1.1B class models show sentinel-only markers
@@ -848,14 +872,14 @@ Policy-gradient RL is explicitly not used for this training stage.
 DCAT blocks (Section 4.3) are the primary gradient receivers for L_BaNEL; their baseline and
 observed streams are directly trained by this loss.
 
-### 8.4 Stage 4 — ECL Alignment via DPO
+### 8.4 Stage 4 — Decision State Alignment via DPO
 
 [Finding: Confirmed Borrowing: Argilla + evtx-sigma-checker]
 
 **Platforms:** Argilla for preference annotation; evtx-sigma-checker for automated validation.
 
 **DPO data pipeline:**
-1. Security analysts annotate preferred vs. rejected ECL state assignments for real incident
+1. Security analysts annotate preferred vs. rejected decision state assignments for real incident
    scenarios via Argilla
 2. If an example references a Sigma rule, evtx-sigma-checker validates the rule fires on the
    provided Windows events before the example enters the DPO pool
@@ -892,7 +916,7 @@ Stages 1–3 to:
 
 ```json
 {
-  "$schema": "https://securefoundation.io/schema/training-example/v1.0.json",
+  "$schema": "https://raw.githubusercontent.com/vajra-foundation/vajra/main/data/schema/training_example.schema.json",
   "schema_version": "1.0",
   "domain": "<detection|forensics|cti|vulnerability|identity|ir|compliance>",
   "scenario_id": "<uuid4>",
@@ -907,7 +931,7 @@ Stages 1–3 to:
     }
   ],
   "expected_techniques": ["<ATT&CK technique ID e.g. T1003>"],
-  "expected_ecl_state": "<ACT|ESCALATE|DEFER|FAIL_SAFE>",
+  "decision_class": "<0|1|2|3>",
   "confidence_label": "<float 0.0–1.0>",
   "reasoning_trace": "<sentinel-only trace string per Section 8.2 compression format>",
   "null_signals": [
@@ -939,7 +963,7 @@ Stages 1–3 to:
 ```
 
 **Required fields** (minimum viable contribution):  
-`domain`, `input_events` (≥1 entry), `expected_ecl_state`
+`domain`, `input_events` (≥1 entry), `decision_class`
 
 **Optional fields** (routing rules):  
 - `null_signals` + `provenance_graph` present → eligible for Stage 3 absence training  
@@ -966,7 +990,7 @@ accepted raw; contributors submit pre-extracted flow features only.
    - Real domain names containing organizational identifiers
    - Person names in free-text fields
    - Contributions failing PII scan are quarantined, not published
-4. **Argilla peer annotation:** Validated contributions enter the Argilla queue for ECL state
+4. **Argilla peer annotation:** Validated contributions enter the Argilla queue for decision state
    preference annotation by ≥2 security analysts; disagreements surfaced for adjudication
 5. **DPO approval:** Examples achieving annotation consensus → `validation_status = dpo_approved`
    and enter the Stage 4 DPO pool
@@ -975,15 +999,15 @@ accepted raw; contributors submit pre-extracted flow features only.
 
 | Repository | Contents |
 |------------|----------|
-| `secureaifoundation/sf-pretrain-detection` | Detection/Alerting corpus: CICIDS flows, UNSW-NB15, Sigma rules, Attack Range logs |
-| `secureaifoundation/sf-pretrain-forensics` | Forensics corpus: DARPA OpTC (subsampled + debiased), LANL Unified Host |
-| `secureaifoundation/sf-pretrain-cti` | CTI corpus: MITRE ATT&CK STIX, MISP galaxies, APTnotes extracted structures |
-| `secureaifoundation/sf-pretrain-vuln` | Vulnerability corpus: NVD, CVE JSON, CVSS vectors, LiveCVEBench tasks |
-| `secureaifoundation/sf-pretrain-identity` | Identity corpus: LANL Auth, CMU CERT, synthetic UEBA |
-| `secureaifoundation/sf-pretrain-ir` | IR corpus: CISA advisories (structured), synthetic playbook SOAR data |
-| `secureaifoundation/sf-pretrain-compliance` | Compliance corpus: CIS OVAL, NIST JSON, ISO 27001 controls |
-| `secureaifoundation/sf-dpo-pairs` | DPO preference pairs: post-Argilla annotation, ECL state preferences |
-| `secureaifoundation/sf-model` | Model weights (PyTorch safetensors), ONNX export, tokenizer, config |
+| `vajra-foundation/vajra-pretrain-detection` | Detection/Alerting corpus: CICIDS flows, UNSW-NB15, Sigma rules, Attack Range logs |
+| `vajra-foundation/vajra-pretrain-forensics` | Forensics corpus: DARPA OpTC (subsampled + debiased), LANL Unified Host |
+| `vajra-foundation/vajra-pretrain-cti` | CTI corpus: MITRE ATT&CK STIX, MISP galaxies, APTnotes extracted structures |
+| `vajra-foundation/vajra-pretrain-vuln` | Vulnerability corpus: NVD, CVE JSON, CVSS vectors, LiveCVEBench tasks |
+| `vajra-foundation/vajra-pretrain-identity` | Identity corpus: LANL Auth, CMU CERT, synthetic UEBA |
+| `vajra-foundation/vajra-pretrain-ir` | IR corpus: CISA advisories (structured), synthetic playbook SOAR data |
+| `vajra-foundation/vajra-pretrain-compliance` | Compliance corpus: CIS OVAL, NIST JSON, ISO 27001 controls |
+| `vajra-foundation/vajra-dpo-pairs` | DPO preference pairs: post-Argilla annotation, decision state preferences |
+| `vajra-foundation/vajra-model` | Model weights (PyTorch safetensors), ONNX export, tokenizer, config |
 
 Each dataset repo requires:
 - Dataset card: license (Apache 2.0), intended use, known limitations (e.g., DARPA OpTC
@@ -993,166 +1017,232 @@ Each dataset repo requires:
 
 ---
 
-## Section 10 — Integration Specification
+## Section 10 — Model Interface Specification
 
-### 10.1 Argus XDR Integration (Go backend)
+Vajra exposes a platform-agnostic inference interface. Consuming systems (XDR
+platforms, SIEM integrations, agentic orchestrators, CLI tools) implement their
+own adapters against this interface. No deployment-specific wire protocol is
+defined here.
 
-**Input contract (Argus XDR → SecureFoundation):**
+### 10.1 Input Contract
 
-```protobuf
-syntax = "proto3";
+All input to Vajra is a structured inference request. The canonical Python
+dataclass representation (consuming systems adapt to their own serialization):
 
-message SecurityEvent {
-  string event_id = 1;
-  string event_type = 2;       // evtx|netflow|stix|cvss|auth|cloudtrail|sigma|cve|ldap|...
-  string domain_tag = 3;       // detection|forensics|cti|vulnerability|identity|ir|compliance
-  int64 timestamp_unix_ms = 4; // -1 if unknown
-  string raw_content = 5;      // sentinel-tokenized string or JSON string
-}
+```python
+@dataclass
+class VajraInferenceRequest:
+    request_id: str                          # UUID4
+    events: list[SecurityEvent]              # max 512 events per call
+    graph_nodes: list[GraphNode] = field(default_factory=list)  # optional RAG subgraph
+    graph_edges: list[GraphEdge] = field(default_factory=list)
+    request_justification_trace: bool = False  # invoke constrained decoder
 
-message GraphNode {
-  string node_id = 1;
-  string node_type = 2;        // process|file|socket|user|network_asset
-  string label = 3;
-  repeated float features = 4; // pre-computed node feature vector (optional)
-}
+@dataclass
+class SecurityEvent:
+    event_type: str       # evtx|netflow|stix|cvss|auth|cloudtrail|sigma|cve|ldap|playbook|cis_control
+    domain_tag: str       # detection|forensics|cti|vulnerability|identity|ir|compliance
+    timestamp_unix_ms: int  # -1 if unknown
+    raw_content: str      # sentinel-tokenized string or JSON string
 
-message GraphEdge {
-  string from_id = 1;
-  string to_id = 2;
-  string relation = 3;         // exec|read|write|connect|fork|spawn|delete
-  int64 timestamp_unix_ms = 4;
-}
+@dataclass
+class GraphNode:
+    node_id: str
+    node_type: str        # process|file|socket|user|network_asset
+    label: str
+    features: list[float] = field(default_factory=list)  # optional pre-computed features
 
-message SFInferenceRequest {
-  string request_id = 1;
-  repeated SecurityEvent events = 2;    // max 512 events per call
-  repeated GraphNode rag_nodes = 3;     // Argus-provided subgraph nodes (max 1024, sampled to 256 if exceeded)
-  repeated GraphEdge rag_edges = 4;     // Argus-provided subgraph edges
-  string signal_taxonomy_level = 5;     // Argus L1-L10 signal taxonomy level
-  bool request_decoder_trace = 6;       // true only for ACT/ESCALATE states requiring analyst trace
-}
+@dataclass
+class GraphEdge:
+    from_id: str
+    to_id: str
+    relation: str         # exec|read|write|connect|fork|spawn|delete
+    timestamp_unix_ms: int
 ```
 
-**Output contract (SecureFoundation → Argus XDR):**
+**Input constraints:**
+- Max 512 events per call
+- Max 1,024 graph nodes (sampled to 256 via degree-centrality if exceeded — consuming
+  system should apply domain-aware pre-sampling before hitting this limit)
+- `request_justification_trace=True` only meaningful when the model's decision_class
+  output is 0 or 1; consuming system should check before invoking
 
-```protobuf
-enum ECLState {
-  ACT = 0;
-  ESCALATE = 1;
-  DEFER = 2;
-  FAIL_SAFE = 3;
-}
+### 10.2 Output Contract
 
-message DAGNode {
-  string node_id = 1;
-  string domain = 2;
-  string technique_id = 3;     // ATT&CK technique ID or empty
-  string evidence_field = 4;
-}
+```python
+@dataclass
+class VajraInferenceResponse:
+    request_id: str
+    decision_class: int                  # 0|1|2|3 — consuming system maps to state names
+    decision_probabilities: list[float]  # [p0, p1, p2, p3], sum=1.0
+    confidence: float                    # calibrated scalar [0.0, 1.0]
+    technique_ids: list[str]             # ATT&CK technique IDs, multi-label
+    evidence_dag: EvidenceDAG
+    afn_scores: list[AFNScore]           # top-16 field importances
+    justification_trace: str             # present only if request_justification_trace=True
+                                         # and decision_class in {0, 1}
+    inference_latency_ms: float
+    early_exit: bool                     # True if F3 fast-tap was used
+    dcat_override: bool                  # True if DCAT divergence forced class upgrade
 
-message DAGEdge {
-  string from_id = 1;
-  string to_id = 2;
-}
+@dataclass
+class EvidenceDAG:
+    nodes: list[DAGNode]
+    edges: list[DAGEdge]
 
-message EvidenceDAG {
-  repeated DAGNode nodes = 1;
-  repeated DAGEdge edges = 2;
-}
+@dataclass
+class DAGNode:
+    node_id: str
+    domain: str
+    technique_id: str      # ATT&CK technique ID or empty string
+    evidence_field: str
 
-message AFNScore {
-  string field_name = 1;
-  string field_value = 2;
-  string domain = 3;
-  float score = 4;
-}
+@dataclass
+class DAGEdge:
+    from_id: str
+    to_id: str
 
-message SFInferenceResponse {
-  string request_id = 1;
-  ECLState ecl_state = 2;
-  float confidence = 3;              // calibrated scalar [0,1]
-  repeated string technique_ids = 4; // ATT&CK technique IDs (multi-label)
-  EvidenceDAG evidence_chain = 5;
-  repeated AFNScore afn_scores = 6;  // top-16 field importances
-  string decoder_trace = 7;          // present only if request_decoder_trace=true
-  float inference_latency_ms = 8;
-  bool early_exit = 9;               // true if F3 fast-tap was used
-}
+@dataclass
+class AFNScore:
+    field_name: str
+    field_value: str
+    domain: str
+    score: float
 ```
 
-**ONNX export:**
-- Export via `torch.onnx.export` at opset=17
-- Two separate ONNX graphs:
-  1. `sf_encoder_fusion.onnx`: domain encoders + DCAT + epistemic fusion + classification heads
-  2. `sf_decoder.onnx`: constrained justification decoder (invoked separately on ACT/ESCALATE)
-- Dynamic axes on both graphs: `batch_size`, `sequence_length`
-- Quantization: INT8 post-training quantization applied to domain encoder weights via ONNX Runtime
-  quantization tooling. Decoder weights are left at FP16 to preserve justification trace quality.
-- Go runtime: `onnxruntime-go` v1.18+ binding
-
-**RAG boundary — what Argus provides at inference time:**
-
-| Data Type | Update Frequency | Rationale |
-|-----------|-----------------|-----------|
-| Zero-day IOC lists | Every 15 minutes | Volatile; cannot be baked in |
-| MISP live threat actor IP feeds | Every 15 minutes | Volatile |
-| CVE records post-training cutoff | Daily | New CVEs published continuously |
-| D3FEND mitigation mappings | Weekly | Relatively stable but not baked per operator decision |
-| Active Directory subgraphs | On-demand per entity | Enterprise-specific; changes continuously |
-| Sigma rule updates (SigmaHQ) | Daily | Community-maintained; evtx-sigma-checker validates |
-| ATT&CK sub-technique updates post-v16 | At model update cycle | Only the base technique embeddings are baked |
-
-[Finding: Architecture Decision Input #4; operator knowledge boundary: minimal baked-in
-(MITRE tactics/techniques only)]
-
-**Latency budget (single A100 80GB, 4096-token input, batch-size=1):**
+### 10.3 Latency Budget (single A100 80GB, 4096-token input, batch-size=1)
 
 | Component | Budget |
 |-----------|--------|
 | Input tokenization (3 paths) | ≤5 ms |
-| 7 domain encoders (parallel execution) | ≤60 ms |
-| DCAT blocks (within encoders) | included in above |
+| 7 domain encoders (parallel) | ≤60 ms |
+| DCAT blocks (within encoders) | included above |
 | Epistemic fusion F1–F6 | ≤15 ms |
 | AFN computation | ≤15 ms |
 | Classification heads + calibration | ≤5 ms |
-| **Total (no decoder)** | **≤100 ms** |
-| Constrained decoder (ACT/ESCALATE only) | ≤50 ms additional |
-| **Total (with decoder)** | **≤150 ms** |
+| **Total (no justification trace)** | **≤100 ms** |
+| Constrained decoder (classes 0–1 only) | ≤50 ms additional |
+| **Total (with justification trace)** | **≤150 ms** |
 
 Target ≤120 ms for non-decoder path leaves 20 ms margin for inference runtime overhead.
 
-### 10.2 Kairos ECL Confidence-to-State Mapping
+### 10.4 ONNX Export
 
-| Model Raw Prediction | Confidence Range | Kairos ECL Output | Notes |
-|---------------------|-----------------|-------------------|-------|
-| ACT | ≥0.85 | ACT | Direct pass-through |
-| ESCALATE | ≥0.85 | ESCALATE | Direct pass-through |
-| ACT | 0.65–0.84 | ESCALATE | Downgrade; human review required before automated action |
-| ESCALATE | 0.65–0.84 | ESCALATE with uncertainty flag | Pass-through with flag |
-| Any | 0.40–0.64 | DEFER | Insufficient confidence for autonomous action |
-| Any | <0.40 | FAIL_SAFE | Model requests human override |
-| Any (DCAT override) | Any, D > θ | ESCALATE | DCAT divergence overrides low-confidence DEFER |
-| Any (RAG unavailable) | — | FAIL_SAFE | Hard fallback; do not infer without required RAG context |
+Two separate ONNX graphs for deployment flexibility:
 
-### 10.3 Themis Integration
+1. `vajra_encoder_fusion.onnx` — domain encoders + DCAT + epistemic fusion +
+   all classification/output heads
+2. `vajra_decoder.onnx` — constrained justification decoder, invoked separately
 
-SecureFoundation operates as a **synchronous analytical oracle** within Themis dispatch:
+Export parameters:
+- opset=17
+- Dynamic axes: `batch_size`, `sequence_length` on both graphs
+- Quantization: INT8 post-training quantization on encoder weights via ONNX Runtime
+  tooling; decoder remains FP16 for trace quality
+- Consuming systems in compiled languages (Go, Rust, C++) use `onnxruntime` bindings
+  against these two graphs; no Python runtime required in production
 
-- Themis passes batched event contexts to SecureFoundation via the Argus XDR `SFInferenceRequest`
-  protobuf. Themis does not call SecureFoundation directly; all calls flow through Argus XDR's
-  inference proxy.
-- SecureFoundation returns `SFInferenceResponse`. Themis uses `ecl_state` to dispatch downstream
-  agentic actions; it does not inspect intermediate model state.
-- SecureFoundation does NOT: call external tools, spawn sub-agents, maintain session state across
-  calls, or store any entity state outside the DCAT baseline cache (which is an inference-layer
-  concern, not a Themis concern).
-- The constrained decoder's `decoder_trace` field is the only text SecureFoundation ever emits
-  into Themis's reasoning context. Themis must not inject decoder trace content back into
-  subsequent inference calls to SecureFoundation (prevents trace self-amplification).
-- The rigid domain-encoder parameter isolation (Section 1.4) provides functional equivalence to
-  Themis-style agent isolation without requiring Themis to manage the domain boundaries.
-  [Finding: Surprise #4]
+### 10.5 Knowledge Boundary
+
+The boundary between baked-in and externally-provided knowledge:
+
+| Knowledge Type | Location | Rationale |
+|----------------|----------|-----------|
+| MITRE ATT&CK tactics (14) + techniques (~700) + sub-techniques (~400) | Baked into weights (frozen after Stage 1) | Stable; innate structural knowledge |
+| CVE records | External RAG | Updated continuously |
+| D3FEND mitigations | External RAG | Per operator decision |
+| Identity / asset graphs | External RAG | Enterprise-specific, changes continuously |
+| Live threat actor IOC feeds | External RAG | Volatile (minutes) |
+| Sigma rule updates (post-training) | External RAG | Community-maintained |
+
+The consuming system is responsible for providing `graph_nodes` and `graph_edges`
+from its RAG pipeline. When graph context is required for a domain (identity,
+vulnerability) and no graph nodes are provided: `decision_class` will be 3
+(insufficient context). This is a hard safety behavior, not configurable.
+
+[Finding: Architecture Decision Input #4; operator knowledge boundary: minimal baked-in
+(MITRE tactics/techniques only)]
+
+### 10.6 Function Calling and Agentic Workflow Interface
+
+Vajra supports structured function calling and multi-turn agentic workflows.
+This is a native capability, not a consuming-system overlay. The format is
+compatible with the OpenAI tool-use schema and the Anthropic tool-use schema,
+allowing Vajra to operate within any agentic framework that supports either.
+
+#### Tool Call Format
+
+When Vajra determines that an external tool call is required to complete a
+reasoning step, the justification decoder emits a structured tool call block
+within the justification trace (visible only when `request_justification_trace=True`):
+
+```json
+{
+  "type": "tool_call",
+  "tool_name": "string",
+  "tool_input": { },
+  "reasoning": "string — why this tool is needed, in security-analyst terms"
+}
+```
+
+The consuming system is responsible for:
+1. Detecting `"type": "tool_call"` blocks in the justification trace
+2. Executing the tool
+3. Constructing a new `VajraInferenceRequest` that includes the tool result
+   as an additional event with `event_type = "tool_result"` and
+   `domain_tag` matching the domain the tool result is relevant to
+
+Tool calls are only emitted when `decision_class` is 0 or 1 and
+`request_justification_trace=True`. They are never emitted as part of the
+structured output heads (DAG, technique IDs, confidence — these are always
+deterministic model outputs, never tool-dependent).
+
+#### Native Tool Vocabulary
+
+The constrained decoder's vocabulary includes a fixed set of tool names that
+Vajra is trained to invoke. These are security-domain tools only:
+
+| Tool Name | Input Schema | Returns |
+|-----------|-------------|---------|
+| `lookup_cve` | `{"cve_id": "CVE-YYYY-NNNNN"}` | CVE record JSON |
+| `lookup_technique` | `{"technique_id": "TNNNN[.NNN]"}` | ATT&CK technique detail |
+| `query_asset_graph` | `{"entity_id": "string", "hops": 1\|2}` | Subgraph nodes+edges |
+| `lookup_ioc` | `{"indicator": "string", "type": "ip\|hash\|domain"}` | IOC reputation record |
+| `get_sigma_rule` | `{"rule_id": "string"}` | Sigma rule YAML |
+| `lookup_d3fend` | `{"technique_id": "TNNNN"}` | D3FEND mitigation mappings |
+
+The consuming system implements these tools; Vajra only emits the call.
+Tool names outside this vocabulary are masked at the logit level — Vajra
+cannot call arbitrary tools.
+
+#### Multi-Turn Agentic Reasoning Format
+
+For multi-step investigations (e.g., pivot from a detection event → query
+the asset graph → re-evaluate with enriched context), Vajra follows a
+stateless multi-turn protocol:
+
+```
+Turn 1: Consumer sends initial events → Vajra returns decision + tool_call
+Turn 2: Consumer executes tool, sends initial events + tool_result as new event → Vajra returns updated decision
+Turn N: Continue until no tool_call in output OR decision_class = 2|3
+```
+
+Vajra maintains no session state between turns. The consuming system is
+responsible for accumulating the event list across turns. Maximum 8 turns
+per investigation chain; the consuming system enforces this limit.
+
+#### Structured Output Mode
+
+When `request_justification_trace=False` (default), Vajra returns only
+structured outputs: `decision_class`, `confidence`, `technique_ids`,
+`evidence_dag`, `afn_scores`. This mode is safe for fully automated pipelines.
+
+When `request_justification_trace=True`, Vajra additionally runs the
+constrained decoder to produce a human-readable justification and any
+required tool calls. This mode is intended for analyst-facing workflows.
+
+The two modes have different latency profiles (see §10.3). Automated
+high-throughput pipelines should use structured output mode only.
 
 ---
 
@@ -1162,7 +1252,7 @@ SecureFoundation operates as a **synchronous analytical oracle** within Themis d
 
 | Head | Primary Metric | Secondary Metric | Target | Baseline |
 |------|---------------|-----------------|--------|---------|
-| ECL state classifier | Macro F1 (4-class) | Per-class recall matrix | F1 ≥ 0.91 | No published baseline |
+| Decision state classifier | Macro F1 (4-class) | Per-class recall matrix | F1 ≥ 0.91 | No published baseline |
 | ATT&CK technique (multilabel) | Micro F1 | Top-5 accuracy | Micro F1 ≥ 0.78; Top-5 ≥ 0.90 | Foundation-Sec-8B |
 | Calibrated confidence | Expected Calibration Error (ECE) | Reliability diagram flatness | ECE ≤ 0.04 | General LLM zero-shot |
 | Evidence chain DAG | Edge F1 vs. ground-truth provenance | Node coverage | Edge F1 ≥ 0.72 | No published baseline |
@@ -1175,7 +1265,7 @@ SecureFoundation operates as a **synchronous analytical oracle** within Themis d
 - Temperature scaling evaluated on held-out OOD set (Splunk Attack Range synthetic events, not
   present in any training corpus)
 - Conformal prediction coverage verified at p=0.90 and p=0.95: the conformal set must contain
-  the true ECL label in ≥90% and ≥95% of OOD test examples respectively
+  the true decision class in ≥90% and ≥95% of OOD test examples respectively
 - Reliability diagrams plotted for each domain encoder output
 
 ### 11.3 Baselines
@@ -1183,14 +1273,14 @@ SecureFoundation operates as a **synchronous analytical oracle** within Themis d
 | Baseline | Type | Parameter Count | Benchmark |
 |----------|------|----------------|-----------|
 | SecureBERT 2.0 (Cisco, ModernBERT-based) | Domain encoder, encoder-only | ~150M | ATT&CK NER, CVSS classification, TTP extraction |
-| Foundation-Sec-8B (Cisco) | Domain LLM, decoder | 8B | TTP extraction, zero-shot ECL approximation, CTI QA |
-| GPT-4o zero-shot | General LLM | ~unknown | Cross-domain correlation, evidence DAG construction, ECL assignment |
+| Foundation-Sec-8B (Cisco) | Domain LLM, decoder | 8B | TTP extraction, zero-shot decision state approximation, CTI QA |
+| GPT-4o zero-shot | General LLM | ~unknown | Cross-domain correlation, evidence DAG construction, decision state assignment |
 | Splunk SIEM rule correlation | Rule-based | N/A | Alert triage F1, false positive rate, null-state detection |
-| 3-agent orchestrated swarm (GPT-4o-mini, Themis orchestrated) | Multi-agent | 3× ~8B | ECL state exact-match on DARPA OpTC scenarios (swarm-safety parity bar) |
+| 3-agent orchestrated swarm (GPT-4o-mini) | Multi-agent | 3× ~8B | Decision state exact-match on DARPA OpTC scenarios (swarm-safety parity bar) |
 
-The swarm-safety parity bar requires SecureFoundation to achieve exact ECL state match on ≥90% of
+The swarm-safety parity bar requires Vajra to achieve exact decision state match on ≥90% of
 200 held-out DARPA OpTC APT scenarios compared to the 3-agent baseline. "Exact match" means
-identical state (ACT/ESCALATE/DEFER/FAIL_SAFE), not just same ordinal direction.
+identical class index (0/1/2/3), not just same ordinal direction.
 
 Additionally: the decoder trace may not reference domain information unavailable in the input to
 the relevant domain encoder. This constraint is verified by automated cross-referencing of AFN
@@ -1205,9 +1295,9 @@ source fields against decoder trace entity mentions.
 | LiveCVEBench (190 agentic tasks) | Vulnerability | CVE contextual reasoning, CVSS scoring accuracy |
 | LANL Auth Dataset | Identity | Anomalous authentication session detection |
 | UNSW-NB15 | Detection | Network intrusion classification, null-state detection (dropped flows) |
-| MITRE ATT&CK Evaluations Round 5 (Carbanak + FIN7) | Multi-domain | Cross-domain kill-chain reconstruction, ECL state assignment |
-| CMU CERT Insider Threat v6.2 | Identity, IR | Behavioral anomaly detection, ECL state assignment |
-| Sigma HQ detection rules (held-out 20%) | Detection | Sigma rule → ECL mapping accuracy |
+| MITRE ATT&CK Evaluations Round 5 (Carbanak + FIN7) | Multi-domain | Cross-domain kill-chain reconstruction, decision state assignment |
+| CMU CERT Insider Threat v6.2 | Identity, IR | Behavioral anomaly detection, decision state assignment |
+| Sigma HQ detection rules (held-out 20%) | Detection | Sigma rule → decision state mapping accuracy |
 
 ---
 
@@ -1218,8 +1308,8 @@ locked for implementation. The spec defines them; it does not resolve them.
 
 | ID | Hypothesis | Method | Success Criterion | Spec Sections Unblocked |
 |----|-----------|--------|-------------------|------------------------|
-| **EXPERIMENT-1** | There exists an optimal temporal window N (number of prior events retained per entity in the DCAT baseline cache) that maximizes null-signal detection without exhausting single-GPU VRAM | Sweep N ∈ {32, 64, 128, 256, 512} on the Detection/Network encoder running DARPA OpTC data. For each N: measure (a) FNR on null-signal validation set, (b) peak VRAM consumption on A100 80GB, (c) inference latency overhead. Run each N over 500 inference calls with 50 entities tracked simultaneously | FNR ≤ 0.08 AND peak VRAM < 40GB AND latency overhead < 15 ms. If no N satisfies all three: adopt the Pareto-optimal N and accept the trade-off; document in Risk Register | §4.3 DCAT baseline mechanism; §10.1 latency budget; determines whether DCAT is viable on commodity inference hardware |
-| **EXPERIMENT-2** | Jointly optimizing (a) continuous cross-domain fusion attention, (b) discrete kill-chain state tracking, and (c) discrete ECL state classification converges stably and without single-objective collapse | Train the full Stage 1–Stage 3 pipeline. At epochs 5, 10, and 15: measure ATT&CK Micro F1, ECL state Macro F1, kill-chain stage prediction accuracy, and loss curve variance. Record whether any objective degrades while others improve (objective conflict signature). Also run head-group probing at each checkpoint to verify head specialization emerges alongside multi-task stability | All three objectives improve together through epoch 15 (no more than 0.03 F1 drop in any objective after epoch 5). Head-group probing pass rates reach their Section 4.2 targets by epoch 10. If multi-task instability is detected: evaluate (a) loss weighting schedules (GradNorm), (b) sequential objective introduction (kill-chain first, then ECL), (c) separate optimization of the ECL head with frozen fusion encoder | §4.4 kill-chain state tracking; §5 reasoning representation; §6.3 ECL classifier; entire training pipeline schedule |
+| **EXPERIMENT-1** | There exists an optimal temporal window N (number of prior events retained per entity in the DCAT baseline cache) that maximizes null-signal detection without exhausting single-GPU VRAM | Sweep N ∈ {32, 64, 128, 256, 512} on the Detection/Network encoder running DARPA OpTC data. For each N: measure (a) FNR on null-signal validation set, (b) peak VRAM consumption on A100 80GB, (c) inference latency overhead. Run each N over 500 inference calls with 50 entities tracked simultaneously | FNR ≤ 0.08 AND peak VRAM < 40GB AND latency overhead < 15 ms. If no N satisfies all three: adopt the Pareto-optimal N and accept the trade-off; document in Risk Register | §4.3 DCAT baseline mechanism; §10.3 latency budget; determines whether DCAT is viable on commodity inference hardware |
+| **EXPERIMENT-2** | Jointly optimizing (a) continuous cross-domain fusion attention, (b) discrete kill-chain state tracking, and (c) discrete decision state classification converges stably and without single-objective collapse | Train the full Stage 1–Stage 3 pipeline. At epochs 5, 10, and 15: measure ATT&CK Micro F1, decision state Macro F1, kill-chain stage prediction accuracy, and loss curve variance. Record whether any objective degrades while others improve (objective conflict signature). Also run head-group probing at each checkpoint to verify head specialization emerges alongside multi-task stability | All three objectives improve together through epoch 15 (no more than 0.03 F1 drop in any objective after epoch 5). Head-group probing pass rates reach their Section 4.2 targets by epoch 10. If multi-task instability is detected: evaluate (a) loss weighting schedules (GradNorm), (b) sequential objective introduction (kill-chain first, then decision state), (c) separate optimization of the decision state head with frozen fusion encoder | §4.4 kill-chain state tracking; §5 reasoning representation; §6.3 decision state classifier; entire training pipeline schedule |
 | **EXPERIMENT-3** | Isolated node behavior pretraining before full-graph APT sequences produces faster convergence and lower local-minima overfitting on the DARPA OpTC forensics task | Two-arm experiment on Forensics/Provenance encoder only. Arm A: Stage 1 pretraining begins with single-node behaviors (individual malicious process executions, isolated file write events) for the first 50% of Stage 1 compute, then introduces full multi-stage APT provenance graphs. Arm B: full provenance graphs from epoch 1. Evaluate ATT&CK stage attribution F1 on DARPA OpTC test set at epoch 5, 10, and 15. Compute budget is identical across arms | Arm A achieves ≥0.05 higher ATT&CK stage F1 at epoch 10 with identical total compute; OR both arms reach equivalent final F1 within 0.02 (adopt Arm B for simplicity). If Arm B is strictly better at all checkpoints: adopt Arm B and note isolated-node pretraining as ineffective for provenance data | §8.1 Stage 1 pretraining curriculum; DARPA OpTC subsampling strategy; determines whether a two-phase pretraining schedule is required |
 
 ---
@@ -1245,15 +1335,15 @@ reduces the throughput penalty.
 
 Integrating Graph Attention Networks or GPS mechanisms for enterprise Active Directory topologies
 is computationally heavy. An enterprise AD graph may contain 100,000+ node entities. At inference
-time, Argus XDR provides pre-extracted 2-hop neighborhood subgraphs per queried entity; the GCN
-encodes a maximum of 256 nodes per call (top-k degree-centrality sampling applied if subgraph
-exceeds 1,024 nodes before sampling). [Finding: Open Question #4]
+time, the consuming system provides pre-extracted 2-hop neighborhood subgraphs per queried entity;
+the GCN encodes a maximum of 256 nodes per call (top-k degree-centrality sampling applied if
+subgraph exceeds 1,024 nodes before sampling). [Finding: Open Question #4]
 
 Risk: low-degree nodes that are critical lateral movement pivot points may be dropped by
-degree-centrality sampling. Mitigation: Argus XDR can apply domain-aware sampling (e.g., prioritize
-nodes with Service Principal Names or AdminCount=1 in AD, which are high-value regardless of degree)
-before passing the subgraph to SecureFoundation. This mitigation is implemented in Argus, not in
-SecureFoundation.
+degree-centrality sampling. Mitigation: the consuming system can apply domain-aware sampling
+(e.g., prioritize nodes with Service Principal Names or AdminCount=1 in AD, which are high-value
+regardless of degree) before passing the subgraph to Vajra. This mitigation is implemented in
+the consuming system, not in Vajra.
 
 ### Risk 3: DARPA OpTC Scripted-Benign Workload Bias
 
@@ -1271,14 +1361,16 @@ If the OOD evaluation set shows >0.10 F1 degradation vs. DARPA test set, additio
 ### Risk 4: Minimal RAG Knowledge Boundary Increases Inference Dependency
 
 The operator's decision to bake only MITRE tactic/technique embeddings means that CVE severity,
-D3FEND mitigations, identity graph topology, and all threat actor profiles must be retrieved from
-Argus XDR on every inference call. This couples model availability to Argus XDR availability.
+D3FEND mitigations, identity graph topology, and all threat actor profiles must be provided by
+the consuming system's RAG pipeline on every inference call. This couples model accuracy to
+RAG availability.
 
 Mitigation:
-- Argus XDR maintains a local replica cache of the most-accessed CVE and D3FEND records
-  (target: top 10,000 CVEs by EPSS score, updated daily)
-- FAIL_SAFE ECL state is the hard fallback when RAG is unavailable — inference does not proceed
-  on vulnerability or identity domain inputs without required graph context
+- The consuming system should maintain a local replica cache of the most-accessed CVE and
+  D3FEND records (recommended: top 10,000 CVEs by EPSS score, updated daily)
+- `decision_class=3` (INSUFFICIENT_CONTEXT) is the hard fallback when RAG is unavailable —
+  inference does not proceed on vulnerability or identity domain inputs without required graph
+  context; this is returned via the standard output contract, not a runtime error
 - For air-gapped SOC deployments: a quarterly "snapshot" ONNX variant includes frozen CVE/D3FEND
   embeddings current as of the snapshot date; knowledge staleness is documented in the model card
 
@@ -1294,9 +1386,9 @@ Mitigation layers (all structural, not policy-dependent):
    attend to arbitrary input positions
 3. Vocabulary mask is applied at logit computation (p = −∞) before sampling — temperature, top-p,
    and repetition penalties cannot unlock blocked tokens
-4. Decoder output is passed through a static blocklist filter before reaching Argus/Themis as a
-   final defense-in-depth layer
-5. The constrained decoder is only invoked on ACT/ESCALATE states — reducing its attack surface
+4. Decoder output is passed through a static blocklist filter before being returned in the
+   `justification_trace` field as a final defense-in-depth layer
+5. The constrained decoder is only invoked for classes 0 or 1 — reducing its attack surface
    to high-priority events where analyst scrutiny is already elevated
 
 ---
@@ -1316,7 +1408,7 @@ Mitigation layers (all structural, not policy-dependent):
 | DCAT augmentation blocks (2 encoders, 2 layers each) | ~40M |
 | Epistemic fusion layer (6L cross-attention, d=1024) | ~100M |
 | Constrained justification decoder (8L, d=1024) | ~160M |
-| Output heads (DAG + ATT&CK + ECL + calibration) | ~35M |
+| Output heads (DAG + ATT&CK + decision state + calibration) | ~35M |
 | **Grand Total** | **~1.16B** |
 
 Target ceiling: 4.0B. Current estimate: ~1.16B. Headroom: ~2.84B.  
@@ -1336,5 +1428,5 @@ quality allows.
 | No generative free-text attack tooling | Constrained decoder: hard vocabulary mask; max 256 tokens; AFN-only cross-attention source |
 | No PII / no real IPs | RFC1918/RFC5737 only in training data; PII scan in validation pipeline; contributor guide enforces |
 | Apache 2.0 license | All weights, code, and training data published under Apache 2.0 |
-| Discrete human-auditable ECL markers | Emitted at F3 (fast) and F6 (full) tap points; persisted in Argus audit trail |
+| Discrete human-auditable decision state markers | Emitted at F3 (fast) and F6 (full) tap points; consuming system is responsible for audit trail persistence |
 | AFN interpretability (not raw attention) | AFN L2-norm at Layer-8 analog; attention heatmaps not exposed to consumers |
