@@ -1,8 +1,4 @@
-"""Instantiated domain encoders for all seven domains (§4.1).
-
-Detection and Forensics use InterleavedAttentionEncoder (Chunk 4).
-The remaining five use DomainEncoder directly.
-"""
+"""Instantiated domain encoders for all seven domains (§4.1)."""
 
 from __future__ import annotations
 
@@ -10,6 +6,7 @@ import torch.nn as nn
 
 from vajra.config import VajraConfig
 from .base_encoder import DomainEncoder
+from .long_context import InterleavedAttentionEncoder
 
 
 def build_standard_encoders(cfg: VajraConfig) -> dict[str, DomainEncoder]:
@@ -35,22 +32,16 @@ def build_standard_encoders(cfg: VajraConfig) -> dict[str, DomainEncoder]:
 
 
 def build_domain_encoders(cfg: VajraConfig) -> dict[str, nn.Module]:
-    """Build all 7 domain encoders.
-
-    Detection and Forensics are placeholder DomainEncoder until Chunk 4
-    replaces them with InterleavedAttentionEncoder + DCAT.
-    """
+    """Build all 7 domain encoders."""
     encoders: dict[str, nn.Module] = build_standard_encoders(cfg)
 
-    # Long-context encoders (Chunk 4 will swap these for InterleavedAttentionEncoder)
     for domain in ("detection_network", "forensics_provenance"):
         enc_cfg = cfg.domain_encoders[domain]
-        encoders[domain] = DomainEncoder(
-            layers=enc_cfg.layers,
+        encoders[domain] = InterleavedAttentionEncoder(
             d_model=enc_cfg.d_model,
             n_heads=enc_cfg.attention_heads,
+            n_layers=enc_cfg.layers,
             ffn_width=enc_cfg.ffn_width,
-            context_window=enc_cfg.context_window_tokens,
         )
 
     return encoders
