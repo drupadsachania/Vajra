@@ -160,7 +160,10 @@ class TestMTPDrafter:
         for i, t in enumerate([10, 20, 30, 40]):
             primary_logits[0, i, t] = 10.0  # highest logit = draft token
         accepted = drafter.verify(draft_ids, primary_logits)
-        assert accepted.shape[1] == k
+        assert accepted.shape == (1, k)   # must be 2-D (1, accepted_len), not (1, k, 1)
+        # accepted must be concat-compatible with a (1, L) context in a speculative loop
+        context = torch.zeros(1, 3, dtype=torch.long)
+        torch.cat([context, accepted], dim=1)
 
     def test_verify_first_mismatch_stops_early(self):
         """Accept primary's token at first mismatch then stop."""
@@ -174,7 +177,7 @@ class TestMTPDrafter:
         primary_logits[0, 2, 30] = 10.0
         primary_logits[0, 3, 40] = 10.0
         accepted = drafter.verify(draft_ids, primary_logits)
-        assert accepted.shape[1] == 2  # token 10 (match) + token 99 (primary at mismatch)
+        assert accepted.shape == (1, 2)  # token 10 (match) + token 99 (primary at mismatch)
         assert accepted[0, 0].item() == 10
         assert accepted[0, 1].item() == 99
 

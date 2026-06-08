@@ -137,4 +137,5 @@ class MTPDrafter(nn.Module):
                 break
         if not accepted:
             return torch.empty(1, 0, dtype=torch.long, device=draft_ids.device)
-        return torch.stack(accepted).unsqueeze(0)   # (1, accepted_len)
+        # Each element is shape (1,); concat → (accepted_len,), then add batch dim → (1, accepted_len)
+        return torch.cat(accepted).unsqueeze(0)   # (1, accepted_len)

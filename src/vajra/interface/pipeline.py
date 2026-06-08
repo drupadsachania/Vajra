@@ -202,14 +202,13 @@ class VajraInferencePipeline(nn.Module):
         # --- Epistemic fusion ---
         fusion_result = self.fusion(fusion_input)
         early_exit = fusion_result.early_exit
-        f6_logits = fusion_result.decision_logits   # (1, 4)
-        f6_probs  = fusion_result.decision_probs    # (1, 4)
 
-        # --- Decision state ---
-        _, probs, decision_class_t = self.decision_head(fusion_input[:, 0, :])
-        decision_class = fusion_result.decision_logits.argmax(dim=-1).item()
-        decision_probs = f6_probs[0].tolist()
-        confidence = float(f6_probs[0].max().item())
+        # --- Decision state (F6 full tap, or F3 logits when early-exit fired) ---
+        decision_logits = fusion_result.decision_logits   # (1, 4)
+        decision_state_probs = fusion_result.decision_probs    # (1, 4)
+        decision_class = decision_logits.argmax(dim=-1).item()
+        decision_probs = decision_state_probs[0].tolist()
+        confidence = float(decision_state_probs[0].max().item())
 
         # --- ATT&CK technique head ---
         fused_cls = fusion_input[:, 0, :]  # use first domain CLS as proxy
@@ -249,12 +248,12 @@ class VajraInferencePipeline(nn.Module):
                     elif k > 16:
                         top_tokens = top_tokens[:, :16, :]
 
-                    # Project to decoder d_model if needed
-                    if top_tokens.shape[-1] != 1024:
-                        # Simple mean-pool projection for integration test
-                        top_tokens = top_tokens.mean(dim=-1, keepdim=True).expand(-1, -1, 1024)
+                    # Project domain d_model → decoder d_model (shared 1024) using the
+                    # same learned projection used for fusion. This is a no-op (Identity)
+                    # for the 1024-dim encoders and a real Linear for the 768/512 ones,
+                    # preserving per-token feature structure for decoder cross-attention.
+                    top_tokens = self._to_fusion[first_domain](top_tokens)
 
-                    bos_ids = torch.tensor([[1]], device=device)
                     out_ids = self.decoder.greedy_decode(top_tokens, max_new_tokens=32)
                     justification_trace = f"<decoded:{out_ids.shape[1]}_tokens>"
 
