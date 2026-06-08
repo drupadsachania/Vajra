@@ -10,6 +10,26 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+def apply_dcat_override(
+    decision_class: int,
+    dcat_divergence: float,
+    theta_divergence: float,
+) -> tuple[int, bool]:
+    """§6.4 DCAT override rule.
+
+    If DCAT divergence D > θ_divergence AND the current decision class is not
+    already 0 (HIGH_CONFIDENCE_ACTION) or 1 (ESCALATE_FOR_REVIEW), force the
+    class to 1 (ESCALATE_FOR_REVIEW). A high null-state divergence means the
+    observation diverged from the learned baseline, so a DEFER (2) or
+    INSUFFICIENT_CONTEXT (3) decision must be escalated for human review.
+
+    Returns (possibly-overridden decision_class, override_applied_flag).
+    """
+    if dcat_divergence > theta_divergence and decision_class not in (0, 1):
+        return 1, True
+    return decision_class, False
+
+
 class DecisionStateClassifier(nn.Module):
     """Linear(d_model → 4) decision state head.
 

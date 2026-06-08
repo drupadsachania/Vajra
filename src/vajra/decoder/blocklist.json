@@ -1,0 +1,25 @@
+{
+  "_meta": {
+    "purpose": "Curated decoder output blocklist. Tokens whose presence in decoder output would violate the hard constraint 'no free-text attack-tooling / exploit-synthesis output' (REQUIREMENTS.lock hard_constraints). Enforced at logit level (p = -inf) before argmax/softmax.",
+    "resolution": "Each entry under 'blocked_terms' is resolved to vocabulary token ID(s) via the active tokenizer at load time. Only terms that map to a single vocabulary token are masked (logit masking is inherently per-token). A real security-corpus BPE vocab is expected to carry these as atomic tokens.",
+    "note": "This list is intentionally conservative and non-operational: it names tool/payload identifiers to suppress, never how to use them."
+  },
+  "blocked_terms": {
+    "exploit_tooling": [
+      "msfvenom", "msfconsole", "metasploit", "meterpreter",
+      "cobaltstrike", "beacon", "sliver", "mimikatz", "bloodhound",
+      "powersploit", "empire", "covenant", "nishang", "responder",
+      "impacket", "crackmapexec", "evil-winrm", "rubeus", "kerbrute"
+    ],
+    "shellcode_payloads": [
+      "shellcode", "reverse_shell", "bind_shell", "payload_stage",
+      "egghunter", "ropchain", "nopsled", "heap_spray", "shellcraft"
+    ],
+    "offensive_actions": [
+      "exfiltrate", "keylog", "ransom_encrypt", "dll_inject",
+      "process_hollow", "uac_bypass", "amsi_bypass", "edr_unhook",
+      "lsass_dump", "dcsync", "golden_ticket", "pass_the_hash"
+    ]
+  },
+  "blocked_token_ids": []
+}

@@ -18,6 +18,10 @@ class DCATConfig:
     dual_stream_alpha: float = 0.3
     ema_beta_baseline_update: float = 0.9
     baseline_frozen_on_decision_classes: tuple[int, ...] = (1, 3)
+    # θ_divergence is EXPERIMENT-1 (§12); this is a placeholder default until the
+    # sweep resolves it. The override rule (§6.4) fires when mean DCAT divergence
+    # exceeds this and the decision class is not already 0/1.
+    theta_divergence: float = 1.0
 
 
 @dataclass

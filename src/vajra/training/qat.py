@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 try:
@@ -48,23 +49,43 @@ class KVCacheQuantizer(nn.Module):
         return self.linear(self.fake_quant(x))
 
 
+class QATLinear(nn.Module):
+    """Linear layer with channel-wise weight FakeQuantize applied in forward.
+
+    Unlike merely attaching a `weight_fake_quant` attribute (which `nn.Linear`
+    never consults), this wrapper actually routes the weight through the
+    fake-quant observer on every forward, so the 2-bit quantization affects
+    both the forward output and the straight-through gradient (true QAT).
+    """
+
+    def __init__(self, linear: nn.Linear, weight_fake_quant: nn.Module):
+        super().__init__()
+        self.linear = linear
+        self.weight_fake_quant = weight_fake_quant
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        w = self.weight_fake_quant(self.linear.weight)
+        return F.linear(x, w, self.linear.bias)
+
+
+def _make_decoder_weight_fq() -> "FakeQuantize":
+    return FakeQuantize(
+        observer=MovingAveragePerChannelMinMaxObserver,
+        quant_min=0,
+        quant_max=3,  # 2-bit: 0..3
+        dtype=torch.quint8,
+        qscheme=torch.per_channel_affine,
+        ch_axis=0,
+    )
+
+
 def _wrap_decoder_linear(module: nn.Module) -> None:
-    """Replace Linear layers in the decoder with 2-bit channel-wise FakeQuantize wrappers."""
+    """Replace Linear layers in the decoder with 2-bit channel-wise QATLinear wrappers."""
     if not _QAT_AVAILABLE:
         return
     for name, child in list(module.named_children()):
         if isinstance(child, nn.Linear):
-            fq = FakeQuantize(
-                observer=MovingAveragePerChannelMinMaxObserver,
-                quant_min=0,
-                quant_max=3,  # 2-bit: 0..3
-                dtype=torch.quint8,
-                qscheme=torch.per_channel_affine,
-                ch_axis=0,
-            )
-            # Wrap: apply FQ to weight proxy; keep original linear for activation
-            child.weight_fake_quant = fq
-            setattr(module, name, child)
+            setattr(module, name, QATLinear(child, _make_decoder_weight_fq()))
         else:
             _wrap_decoder_linear(child)
 

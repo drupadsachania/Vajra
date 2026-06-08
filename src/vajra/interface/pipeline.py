@@ -20,7 +20,7 @@ from vajra.encoders.domain_encoders import build_domain_encoders
 from vajra.fusion.epistemic_fusion import EpistemicFusionLayer
 from vajra.heads.dag_head import EvidenceDAGHead
 from vajra.heads.technique_head import ATTACKClassifier
-from vajra.heads.decision_head import DecisionStateClassifier
+from vajra.heads.decision_head import DecisionStateClassifier, apply_dcat_override
 from vajra.decoder.decoder import ConstrainedDecoder
 
 from .types import (
@@ -210,6 +210,20 @@ class VajraInferencePipeline(nn.Module):
         decision_probs = decision_state_probs[0].tolist()
         confidence = float(decision_state_probs[0].max().item())
 
+        # --- DCAT override (§6.4) ---
+        # Mean DCAT divergence across the DCAT-bearing encoders (Detection,
+        # Forensics). A high null-state divergence forces escalation when the
+        # decision would otherwise DEFER (2) or be INSUFFICIENT_CONTEXT (3).
+        max_dcat_divergence = 0.0
+        for domain in ("detection_network", "forensics_provenance"):
+            enc = self.domain_encoders[domain]
+            div = getattr(enc, "last_dcat_divergence", None)
+            if div is not None:
+                max_dcat_divergence = max(max_dcat_divergence, float(div.mean().item()))
+        decision_class, dcat_override = apply_dcat_override(
+            decision_class, max_dcat_divergence, self.cfg.dcat.theta_divergence
+        )
+
         # --- ATT&CK technique head ---
         fused_cls = fusion_input[:, 0, :]  # use first domain CLS as proxy
         technique_probs = self.attack_head(fused_cls)[0]  # (716,)
@@ -230,7 +244,6 @@ class VajraInferencePipeline(nn.Module):
 
         # --- Constrained decoder (only for classes 0/1 + justification requested) ---
         justification_trace = ""
-        dcat_override = False
 
         if request.request_justification_trace and decision_class in (0, 1):
             # Gather AFN top-16 tokens for the first available domain

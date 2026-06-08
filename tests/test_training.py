@@ -3,8 +3,10 @@ import pytest
 import torch
 import torch.nn as nn
 from vajra.training.losses import FMLMLoss, KillChainLoss, BaNELLoss, DPOLoss, MITREOntologyLoss
-from vajra.training.qat import wNa8o8Schedule, KVCacheQuantizer
-from vajra.training.data import TrainingExampleLoader, DOMAIN_TAG_MAP
+from vajra.training.qat import wNa8o8Schedule, KVCacheQuantizer, QATLinear
+from vajra.training.data import (
+    TrainingExampleLoader, DOMAIN_TAG_MAP, RealIPInTrainingError, find_disallowed_ips,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -175,21 +177,34 @@ class TestMITREOntologyLoss:
 # QAT schedule
 # ---------------------------------------------------------------------------
 class TestQATSchedule:
-    def test_decoder_linears_get_fake_quant(self):
-        """After apply_qat_to_module, decoder Linear layers have weight_fake_quant."""
+    def test_decoder_linears_become_qat_linear(self):
+        """After apply_qat_to_module, decoder Linear layers are wrapped in QATLinear."""
         decoder = nn.Sequential(
             nn.Linear(64, 64),
             nn.ReLU(),
             nn.Linear(64, 32),
         )
         wNa8o8Schedule.apply_qat_to_module(decoder, mode="decoder")
-        # Check that weight_fake_quant was attached
-        fq_found = any(
-            hasattr(m, "weight_fake_quant")
-            for m in decoder.modules()
-            if isinstance(m, nn.Linear)
-        )
-        assert fq_found
+        qat_layers = [m for m in decoder.modules() if isinstance(m, QATLinear)]
+        assert len(qat_layers) == 2  # both Linears wrapped
+
+    def test_decoder_qat_actually_quantizes_in_forward(self):
+        """QATLinear must apply fake-quant in forward — output differs from full precision."""
+        torch.manual_seed(0)
+        linear = nn.Linear(32, 32, bias=False)
+        wrapped = nn.Sequential(linear)
+        wNa8o8Schedule.apply_qat_to_module(wrapped, mode="decoder")
+        qat = wrapped[0]
+        assert isinstance(qat, QATLinear)
+
+        x = torch.randn(4, 32)
+        # Enable the observer + fake-quant (QAT train mode)
+        qat.train()
+        qat_out = qat(x)                                  # fake-quant applied to weight
+        fp_out = nn.functional.linear(x, linear.weight)   # full-precision reference
+        # 2-bit quantization is lossy → outputs must differ measurably
+        assert not torch.allclose(qat_out, fp_out, atol=1e-4)
+        assert torch.isfinite(qat_out).all()
 
     def test_kv_projections_get_quantizer(self):
         """After apply_qat_to_module(mode='encoder'), k/v linears become KVCacheQuantizer."""
@@ -269,5 +284,49 @@ class TestTrainingDataLoader:
         assert TrainingExampleLoader.tokenization_path_for("netflow") == "B"
         assert TrainingExampleLoader.tokenization_path_for("mitre_kg") == "C"
         assert TrainingExampleLoader.tokenization_path_for("evtx") == "A"
+
+
+# ---------------------------------------------------------------------------
+# IP enforcement at ingest (no real IPs in training data)
+# ---------------------------------------------------------------------------
+class TestIPEnforcement:
+    def _example_with_ip(self, ip):
+        return {
+            "events": [
+                {"event_type": "netflow", "domain": "detection_network",
+                 "data": {"src_ip": "10.0.0.5", "dst_ip": ip}},
+            ],
+            "labels": {},
+        }
+
+    def test_rfc1918_ip_allowed(self):
+        loader = TrainingExampleLoader([self._example_with_ip("192.168.1.10")])
+        assert len(loader) == 1
+
+    def test_rfc5737_doc_ip_allowed(self):
+        loader = TrainingExampleLoader([self._example_with_ip("203.0.113.5")])
+        assert len(loader) == 1
+
+    def test_real_public_ip_rejected(self):
+        with pytest.raises(RealIPInTrainingError):
+            TrainingExampleLoader([self._example_with_ip("8.8.8.8")])
+
+    def test_real_ip_rejected_when_nested_deep(self):
+        ex = {"events": [{"data": {"log": {"msg": "connect to 1.1.1.1 now"}}}]}
+        with pytest.raises(RealIPInTrainingError):
+            TrainingExampleLoader([ex])
+
+    def test_validation_can_be_disabled(self):
+        # Explicit opt-out still loads (e.g. for already-sanitized corpora)
+        loader = TrainingExampleLoader(
+            [self._example_with_ip("8.8.8.8")], validate_ips=False
+        )
+        assert len(loader) == 1
+
+    def test_find_disallowed_ips_reports_only_public(self):
+        ex = self._example_with_ip("198.51.100.7")  # RFC5737 → allowed
+        assert find_disallowed_ips(ex) == []
+        ex2 = self._example_with_ip("9.9.9.9")       # public → flagged
+        assert "9.9.9.9" in find_disallowed_ips(ex2)
         assert TrainingExampleLoader.tokenization_path_for("stix") == "A"
         assert TrainingExampleLoader.tokenization_path_for("unknown") == "A"

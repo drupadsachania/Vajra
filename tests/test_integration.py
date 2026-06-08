@@ -15,6 +15,7 @@ from vajra.interface.function_calling import parse_tool_calls, NATIVE_TOOLS, Too
 from vajra.interface.onnx_export import export_encoder_fusion, export_decoder
 from vajra.decoder.decoder import ConstrainedDecoder
 from vajra.fusion.epistemic_fusion import EpistemicFusionLayer
+from vajra.heads.decision_head import apply_dcat_override
 
 
 @pytest.fixture(scope="module")
@@ -133,6 +134,57 @@ class TestEarlyExit:
         result = fusion(x)
         assert result.early_exit is True
         assert result.exit_block == 3
+
+
+# ---------------------------------------------------------------------------
+# DCAT override (§6.4)
+# ---------------------------------------------------------------------------
+class TestDCATOverride:
+    def test_helper_forces_class_1_on_high_divergence(self):
+        # class 2/3 with divergence above θ → forced to 1
+        assert apply_dcat_override(2, 5.0, 1.0) == (1, True)
+        assert apply_dcat_override(3, 5.0, 1.0) == (1, True)
+
+    def test_helper_no_override_for_class_0_or_1(self):
+        assert apply_dcat_override(0, 5.0, 1.0) == (0, False)
+        assert apply_dcat_override(1, 5.0, 1.0) == (1, False)
+
+    def test_helper_no_override_below_threshold(self):
+        assert apply_dcat_override(2, 0.5, 1.0) == (2, False)
+
+    def test_pipeline_applies_override(self, cfg):
+        """High injected DCAT divergence + DEFER decision → escalated, flag set."""
+        torch.manual_seed(7)
+        pipe = VajraInferencePipeline(cfg=cfg, tiny=True)
+        pipe.eval()
+
+        with torch.no_grad():
+            # F3 uniform → no early exit; F6 → class 2 (DEFER)
+            pipe.fusion.f3_head.weight.zero_(); pipe.fusion.f3_head.bias.zero_()
+            pipe.fusion.f6_head.weight.zero_(); pipe.fusion.f6_head.bias.zero_()
+            pipe.fusion.f6_head.bias[2] = 20.0
+
+        # Inject high divergence on a DCAT-bearing encoder + low threshold
+        pipe.domain_encoders["detection_network"].last_dcat_divergence = torch.tensor([[5.0]])
+        pipe.cfg.dcat.theta_divergence = 1.0
+
+        resp = pipe.run(_make_request())
+        assert resp.decision_class == 1     # DEFER (2) escalated to ESCALATE (1)
+        assert resp.dcat_override is True
+
+    def test_pipeline_no_override_when_divergence_low(self, cfg):
+        torch.manual_seed(7)
+        pipe = VajraInferencePipeline(cfg=cfg, tiny=True)
+        pipe.eval()
+        with torch.no_grad():
+            pipe.fusion.f3_head.weight.zero_(); pipe.fusion.f3_head.bias.zero_()
+            pipe.fusion.f6_head.weight.zero_(); pipe.fusion.f6_head.bias.zero_()
+            pipe.fusion.f6_head.bias[2] = 20.0
+        pipe.domain_encoders["detection_network"].last_dcat_divergence = torch.tensor([[0.1]])
+        pipe.cfg.dcat.theta_divergence = 1.0
+        resp = pipe.run(_make_request())
+        assert resp.decision_class == 2     # stays DEFER
+        assert resp.dcat_override is False
 
 
 # ---------------------------------------------------------------------------

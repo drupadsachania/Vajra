@@ -66,6 +66,35 @@ class TestVocabularyMask:
             if sid < vocab_size:
                 assert sid in mask.blocked_ids
 
+    def test_blocklist_loaded_from_curated_file(self, vocab_size):
+        """The blocklist file is real and parses with attack-tooling categories."""
+        import json
+        from pathlib import Path
+        from vajra.decoder import vocab_mask as vm
+        blocklist = json.loads(Path(vm._DEFAULT_BLOCKLIST_PATH).read_text())
+        terms = blocklist["blocked_terms"]
+        assert "exploit_tooling" in terms
+        # A few representative curated terms must be present
+        flat = {t for cat in terms.values() for t in cat}
+        assert {"msfvenom", "mimikatz", "shellcode"} <= flat
+
+    def test_curated_terms_resolved_via_tokenizer(self, vocab_size):
+        """When a tokenizer maps a blocked term to a single token, that ID is masked."""
+        class _FakeTok:
+            # Map specific attack terms to single token IDs; everything else multi-token
+            _single = {"mimikatz": 4242, "shellcode": 4243}
+            def encode(self, text):
+                if text in self._single:
+                    return [self._single[text]]
+                return [ord(c) % 100 for c in text]  # multi-token → not maskable
+
+        mask = VocabularyMask(vocab_size, tokenizer=_FakeTok())
+        assert 4242 in mask.blocked_ids   # mimikatz resolved + blocked
+        assert 4243 in mask.blocked_ids   # shellcode resolved + blocked
+        logits = torch.zeros(1, vocab_size)
+        out = mask.apply(logits)
+        assert out[0, 4242] == float("-inf")
+
 
 # ---------------------------------------------------------------------------
 # ConstrainedDecoder
