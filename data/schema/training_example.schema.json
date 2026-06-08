@@ -1,0 +1,185 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/vajra-foundation/vajra/main/data/schema/training_example.schema.json",
+  "title": "VajraTrainingExample",
+  "description": "Schema for a Vajra training example (§9.1). Required fields: domain, input_events, decision_class.",
+  "type": "object",
+  "required": ["schema_version", "domain", "input_events", "decision_class"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "domain": {
+      "type": "string",
+      "enum": ["detection", "forensics", "cti", "vulnerability", "identity", "ir", "compliance"]
+    },
+    "scenario_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUID v4 uniquely identifying this scenario."
+    },
+    "timestamp_utc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO8601 UTC timestamp of scenario creation or observation."
+    },
+    "input_events": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Ordered sequence of security events forming the scenario.",
+      "items": {
+        "type": "object",
+        "required": ["event_type", "raw_content", "domain_tag"],
+        "additionalProperties": false,
+        "properties": {
+          "event_type": {
+            "type": "string",
+            "enum": [
+              "evtx", "netflow", "stix", "cvss", "auth",
+              "cloudtrail", "sigma", "cve", "ldap", "playbook", "cis_control"
+            ]
+          },
+          "event_timestamp_utc": {
+            "type": ["string", "null"],
+            "format": "date-time"
+          },
+          "raw_content": {
+            "description": "Sentinel-tokenized string or structured JSON object. No real IPs or hostnames.",
+            "oneOf": [
+              {"type": "string"},
+              {"type": "object"}
+            ]
+          },
+          "source_host": {
+            "type": ["string", "null"],
+            "description": "Anonymized host identifier only (e.g. host-001). Never a real hostname or IP."
+          },
+          "domain_tag": {
+            "type": "string",
+            "enum": ["detection", "forensics", "cti", "vulnerability", "identity", "ir", "compliance"]
+          },
+          "is_null_signal": {
+            "type": "boolean",
+            "description": "True if this event slot represents an expected-but-absent signal. Used for BaNEL loss.",
+            "default": false
+          }
+        }
+      }
+    },
+    "expected_techniques": {
+      "type": "array",
+      "description": "ATT&CK technique IDs applicable to this scenario (e.g. T1003, T1059.001).",
+      "items": {
+        "type": "string",
+        "pattern": "^T\\d{4}(\\.\\d{3})?$"
+      }
+    },
+    "decision_class": {
+      "type": "integer",
+      "enum": [0, 1, 2, 3],
+      "description": "Ground-truth decision class: 0=HIGH_CONFIDENCE_ACTION, 1=ESCALATE_FOR_REVIEW, 2=DEFER, 3=INSUFFICIENT_CONTEXT"
+    },
+    "confidence_label": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0,
+      "description": "Annotator confidence in the decision_class label."
+    },
+    "reasoning_trace": {
+      "type": "string",
+      "description": "Sentinel-only reasoning trace per §8.2 compression format. Presence makes example eligible for Stage 2 CoT distillation."
+    },
+    "null_signals": {
+      "type": "array",
+      "description": "Fields expected but absent. Combined with provenance_graph, makes example eligible for Stage 3 absence training.",
+      "items": {
+        "type": "object",
+        "required": ["expected_field", "reason_absent"],
+        "additionalProperties": false,
+        "properties": {
+          "expected_field": {
+            "type": "string",
+            "description": "Name of the field or event type that was expected but not observed."
+          },
+          "reason_absent": {
+            "type": "string",
+            "description": "Brief explanation of why the signal is absent."
+          }
+        }
+      }
+    },
+    "provenance_graph": {
+      "type": "object",
+      "description": "Host-level provenance graph for forensics and absence reasoning.",
+      "additionalProperties": false,
+      "properties": {
+        "nodes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "type", "label"],
+            "additionalProperties": false,
+            "properties": {
+              "id": {"type": "string"},
+              "type": {
+                "type": "string",
+                "enum": ["process", "file", "socket", "user", "network_asset"]
+              },
+              "label": {"type": "string"}
+            }
+          }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["from", "to", "relation"],
+            "additionalProperties": false,
+            "properties": {
+              "from": {"type": "string"},
+              "to": {"type": "string"},
+              "relation": {
+                "type": "string",
+                "enum": ["exec", "read", "write", "connect", "fork", "spawn", "delete"]
+              },
+              "timestamp_utc": {
+                "type": ["string", "null"],
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["synthetic", "license"],
+      "additionalProperties": false,
+      "properties": {
+        "contributor_id": {
+          "type": "string",
+          "description": "SHA-256 of an anonymized contributor identifier. Used for attribution only.",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "synthetic": {
+          "type": "boolean",
+          "description": "True if this scenario was generated synthetically rather than observed."
+        },
+        "validation_status": {
+          "type": "string",
+          "enum": ["pending", "sigma_validated", "dpo_approved", "rejected"],
+          "default": "pending"
+        },
+        "license": {
+          "type": "string",
+          "const": "Apache-2.0"
+        }
+      }
+    }
+  }
+}
