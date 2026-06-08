@@ -1,0 +1,66 @@
+{
+  "total_parameters": 1175000000,
+  "exploit_synthesis_in_weights": false,
+  "free_text_attack_tooling_output": false,
+  "decoder_vocabulary_mask_level": "logit_p_neg_infinity",
+  "real_ips_in_training": false,
+  "shared_d_model": 1024,
+
+  "domain_encoders": {
+    "detection_network":    {"layers": 12, "d_model": 1024, "attention_heads": 16, "ffn_width": 4096},
+    "forensics_provenance": {"layers": 12, "d_model": 1024, "attention_heads": 16, "ffn_width": 4096},
+    "cti_stix":             {"layers": 8,  "d_model": 768,  "attention_heads": 12, "ffn_width": 3072},
+    "vulnerability_risk":   {"layers": 8,  "d_model": 768,  "attention_heads": 12, "ffn_width": 3072},
+    "identity_access":      {"layers": 6,  "d_model": 768,  "attention_heads": 12, "ffn_width": 3072},
+    "incident_response":    {"layers": 6,  "d_model": 768,  "attention_heads": 12, "ffn_width": 3072},
+    "compliance":           {"layers": 4,  "d_model": 512,  "attention_heads": 8,  "ffn_width": 2048}
+  },
+
+  "decoder": {
+    "layers": 8,
+    "d_model": 1024,
+    "max_output_tokens": 256,
+    "cross_attention_source": "AFN_top_k_evidence_tokens_only",
+    "afn_top_k": 16,
+    "cross_attention_raw_encoder_states_allowed": false
+  },
+
+  "fusion": {
+    "blocks": 6,
+    "d_model": 1024,
+    "attention_heads": 16,
+    "ecl_tap_fast": "F3",
+    "ecl_tap_full": "F6",
+    "ecl_tap_fast_condition_defer_confidence_gt": 0.92
+  },
+
+  "afn": {
+    "max_latency_ms": 15,
+    "top_k": 16
+  },
+
+  "inference_latency_ms_no_decoder": 100,
+
+  "tokenization": {
+    "cvss_bpe_allowed": false,
+    "ip_addresses_bpe_allowed": false,
+    "ecl_tokens_encoder_input_allowed": false
+  },
+
+  "encoder_shared_config": {
+    "shared_weights_across_encoders": false,
+    "cross_encoder_attention_within_stacks": false
+  },
+
+  "training": {
+    "stage_1": {"sentinel_positions_masked": false},
+    "stage_2": {"verbose_NL_CoT_in_training_signal": false},
+    "stage_3": {"policy_gradient_RL_used": false}
+  },
+
+  "integration": {
+    "argus_xdr": {"onnx_opset": 17}
+  },
+
+  "baked_in_knowledge": "MITRE_ATT&CK_Enterprise_v16_tactics_and_techniques_only"
+}
