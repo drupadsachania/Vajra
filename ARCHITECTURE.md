@@ -431,9 +431,34 @@ epistemic layer]
 | Incident Response | 6 | 768 | 12 | 3072 | ~65M | Data-sparse; ground-truth decision state labels almost entirely crowdsourced or synthetic [Finding: Domain Data Inventory — IR usability 2/5] |
 | Compliance | 4 | 512 | 8 | 2048 | ~28M | Structural control matching; no deep sequential reasoning required [Finding: Domain Data Inventory — Compliance usability 3/5, disconnected from live telemetry] |
 
+**Context window and attention pattern:**
+
+- **Detection/Network:** Context window: 32K tokens default, expandable to 256K via interleaved
+  RoPE/NoPE attention pattern. Local layers use 4096-token sliding window with rotary positional
+  embeddings. Global layers (every 4th layer) use full attention with no positional embeddings
+  (NoPE). This pattern is borrowed from Gemma 4's interleaved attention design and handles
+  continuous NetFlow and PCAP metadata streams that exceed standard context budgets. The
+  4096-token input referenced in Section 10.3 latency benchmarks reflects a single-event-batch;
+  sustained telemetry ingestion operates at the full context window.
+- **Forensics/Provenance:** Context window: 32K tokens default, expandable to 256K via the same
+  interleaved RoPE/NoPE pattern as the Detection encoder. Required for multi-day DARPA OpTC-style
+  provenance graphs where a complete APT kill chain across 1000 hosts cannot be represented in
+  4096 tokens without destructive truncation.
+- **CTI/STIX:** Context window: 4096 tokens. Standard context is sufficient for this domain's
+  input types.
+- **Vulnerability/Risk:** Context window: 4096 tokens. Standard context is sufficient for this
+  domain's input types.
+- **Identity/Access:** Context window: 4096 tokens. Standard context is sufficient for this
+  domain's input types.
+- **Incident Response:** Context window: 4096 tokens. Standard context is sufficient for this
+  domain's input types.
+- **Compliance:** Context window: 4096 tokens. Standard context is sufficient for this domain's
+  input types.
+
 **All domain encoders share:**
 - Pre-LayerNorm (more stable for fine-tuning than post-LN)
-- Rotary Position Embeddings (RoPE) for within-encoder relative position
+- Rotary Position Embeddings (RoPE) for within-encoder relative position; Detection and Forensics
+  encoders use interleaved RoPE/NoPE for long-context support (see context window specifications above)
 - Bidirectional (non-causal) self-attention
 - GELU activation in FFN
 - Dropout p=0.1 during training, p=0 at inference
@@ -813,6 +838,19 @@ network flows (Zeek FLOW) are unified into a single temporal graph schema:
 before full APT graph sequences produces faster convergence and lower overfitting is unresolved.
 See Section 12. [Finding: Open Question #3]
 
+### 8.1.1 Quantization-Aware Training Schedule
+
+Quantization-Aware Training is initialized from epoch zero using the wNa8o8 schema. This is not
+post-training quantization — compression tolerance is baked into the weights during the training
+loop itself. PTQ applied after training would destroy the precision required for exact security
+reasoning on structured fields like CVSS vectors and STIX objects. Three mechanisms are applied
+simultaneously from the first training step: channel-wise 2-bit quantization on the constrained
+decoder layers, 8-bit static KV caches across all domain encoders and the fusion layer, and
+simulated low-precision math during the forward pass so gradients reflect quantized weight
+behavior. The target is a model that runs under 4GB VRAM on the encoder-fusion path and under
+2GB additional for the decoder, enabling deployment on standard analyst-grade hardware without
+a separate quantization pass before shipping.
+
 ### 8.2 Stage 2 — CoT Distillation from Frontier Teacher
 
 **Teacher model:** GPT-4o or Claude Opus 4.8 prompted with security-specific chain-of-thought
@@ -907,6 +945,22 @@ Stages 1–3 to:
 - All synthetic IPs: RFC1918 ranges only
 - All synthetic usernames, hostnames: anonymized with consistent within-scenario mapping
 - Synthetic DPO pairs are generated automatically before human analysts refine them in Argilla
+
+### 8.5 MTP Drafter Co-Training
+
+A lightweight Multi-Token Prediction drafter model is co-trained alongside the primary Vajra
+model throughout Stages 1 through 4. The drafter uses speculative decoding: it drafts multiple
+future tokens in parallel which the primary model then verifies in a single forward pass. This
+yields up to 3× latency reduction on the constrained decoder path without quality or reasoning
+degradation, because verification is the primary model's judgment — the drafter only proposes.
+The drafter architecture is a shallow transformer sharing the primary model's tokenizer and
+embedding weights but with 2 decoder layers and d=512, approximately 15M parameters. It is
+trained on the same corpus as the primary model with an additional next-token prediction head.
+At inference time the drafter runs on CPU while the primary model runs on GPU, eliminating idle
+GPU cycles during autoregressive generation. The 50ms decoder latency budget in Section 10.3
+assumes MTP speculative decoding is active. Without the drafter the decoder budget rises to
+approximately 90ms, which still fits within the 150ms total target but removes the margin for
+runtime overhead.
 
 ---
 
@@ -1121,10 +1175,13 @@ class AFNScore:
 | AFN computation | ≤15 ms |
 | Classification heads + calibration | ≤5 ms |
 | **Total (no justification trace)** | **≤100 ms** |
-| Constrained decoder (classes 0–1 only) | ≤50 ms additional |
+| Constrained decoder (classes 0–1 only) | ≤50 ms additional¹ |
 | **Total (with justification trace)** | **≤150 ms** |
 
 Target ≤120 ms for non-decoder path leaves 20 ms margin for inference runtime overhead.
+
+¹ Assumes MTP drafter co-trained per §8.5 is active. Without drafter: ~90ms. Both scenarios fit
+within the 150ms total target.
 
 ### 10.4 ONNX Export
 
@@ -1137,8 +1194,9 @@ Two separate ONNX graphs for deployment flexibility:
 Export parameters:
 - opset=17
 - Dynamic axes: `batch_size`, `sequence_length` on both graphs
-- Quantization: INT8 post-training quantization on encoder weights via ONNX Runtime
-  tooling; decoder remains FP16 for trace quality
+- Quantization: INT8 ONNX export of QAT-trained encoder weights (wNa8o8 schema, §8.1.1);
+  this is a format conversion, not post-training compression. Decoder exported at FP16;
+  channel-wise 2-bit quantization on decoder layers is already baked via QAT.
 - Consuming systems in compiled languages (Go, Rust, C++) use `onnxruntime` bindings
   against these two graphs; no Python runtime required in production
 
@@ -1308,7 +1366,7 @@ locked for implementation. The spec defines them; it does not resolve them.
 
 | ID | Hypothesis | Method | Success Criterion | Spec Sections Unblocked |
 |----|-----------|--------|-------------------|------------------------|
-| **EXPERIMENT-1** | There exists an optimal temporal window N (number of prior events retained per entity in the DCAT baseline cache) that maximizes null-signal detection without exhausting single-GPU VRAM | Sweep N ∈ {32, 64, 128, 256, 512} on the Detection/Network encoder running DARPA OpTC data. For each N: measure (a) FNR on null-signal validation set, (b) peak VRAM consumption on A100 80GB, (c) inference latency overhead. Run each N over 500 inference calls with 50 entities tracked simultaneously | FNR ≤ 0.08 AND peak VRAM < 40GB AND latency overhead < 15 ms. If no N satisfies all three: adopt the Pareto-optimal N and accept the trade-off; document in Risk Register | §4.3 DCAT baseline mechanism; §10.3 latency budget; determines whether DCAT is viable on commodity inference hardware |
+| **EXPERIMENT-1** | There exists an optimal temporal window N (number of prior events retained per entity in the DCAT baseline cache) that maximizes null-signal detection without exhausting single-GPU VRAM. A secondary hypothesis is that the interleaved attention mechanism itself has a degradation threshold independent of VRAM — specifically, that beyond a certain baseline window size N the contrastive loss function begins receiving noise-dominated gradients from the NoPE global layers, which do not encode positional distance and therefore cannot distinguish between a recent absence and a distant one. This threshold may be lower than the VRAM ceiling and would be the binding constraint. The sweep in the method column should therefore measure contrastive loss gradient variance as a fourth metric alongside FNR, VRAM, and latency. | Sweep N ∈ {32, 64, 128, 256, 512} on the Detection/Network encoder running DARPA OpTC data. For each N: measure (a) FNR on null-signal validation set, (b) peak VRAM consumption on A100 80GB, (c) inference latency overhead, (d) contrastive loss gradient variance across the NoPE global attention layers — flag if variance exceeds 2× the variance observed at N=32 baseline. Run each N over 500 inference calls with 50 entities tracked simultaneously | FNR ≤ 0.08 AND peak VRAM < 40GB AND latency overhead < 15 ms. If no N satisfies all three: adopt the Pareto-optimal N and accept the trade-off; document in Risk Register | §4.3 DCAT baseline mechanism; §10.3 latency budget; determines whether DCAT is viable on commodity inference hardware |
 | **EXPERIMENT-2** | Jointly optimizing (a) continuous cross-domain fusion attention, (b) discrete kill-chain state tracking, and (c) discrete decision state classification converges stably and without single-objective collapse | Train the full Stage 1–Stage 3 pipeline. At epochs 5, 10, and 15: measure ATT&CK Micro F1, decision state Macro F1, kill-chain stage prediction accuracy, and loss curve variance. Record whether any objective degrades while others improve (objective conflict signature). Also run head-group probing at each checkpoint to verify head specialization emerges alongside multi-task stability | All three objectives improve together through epoch 15 (no more than 0.03 F1 drop in any objective after epoch 5). Head-group probing pass rates reach their Section 4.2 targets by epoch 10. If multi-task instability is detected: evaluate (a) loss weighting schedules (GradNorm), (b) sequential objective introduction (kill-chain first, then decision state), (c) separate optimization of the decision state head with frozen fusion encoder | §4.4 kill-chain state tracking; §5 reasoning representation; §6.3 decision state classifier; entire training pipeline schedule |
 | **EXPERIMENT-3** | Isolated node behavior pretraining before full-graph APT sequences produces faster convergence and lower local-minima overfitting on the DARPA OpTC forensics task | Two-arm experiment on Forensics/Provenance encoder only. Arm A: Stage 1 pretraining begins with single-node behaviors (individual malicious process executions, isolated file write events) for the first 50% of Stage 1 compute, then introduces full multi-stage APT provenance graphs. Arm B: full provenance graphs from epoch 1. Evaluate ATT&CK stage attribution F1 on DARPA OpTC test set at epoch 5, 10, and 15. Compute budget is identical across arms | Arm A achieves ≥0.05 higher ATT&CK stage F1 at epoch 10 with identical total compute; OR both arms reach equivalent final F1 within 0.02 (adopt Arm B for simplicity). If Arm B is strictly better at all checkpoints: adopt Arm B and note isolated-node pretraining as ineffective for provenance data | §8.1 Stage 1 pretraining curriculum; DARPA OpTC subsampling strategy; determines whether a two-phase pretraining schedule is required |
 
@@ -1409,9 +1467,10 @@ Mitigation layers (all structural, not policy-dependent):
 | Epistemic fusion layer (6L cross-attention, d=1024) | ~100M |
 | Constrained justification decoder (8L, d=1024) | ~160M |
 | Output heads (DAG + ATT&CK + decision state + calibration) | ~35M |
-| **Grand Total** | **~1.16B** |
+| MTP drafter (2L, d=512; incremental over shared embedding weights) | ~15M |
+| **Grand Total** | **~1.175B** |
 
-Target ceiling: 4.0B. Current estimate: ~1.16B. Headroom: ~2.84B.  
+Target ceiling: 4.0B. Current estimate: ~1.175B. Headroom: ~2.825B.  
 The headroom provides margin for architecture ablations identified by EXPERIMENT-2, potential
 decoder depth increases for justification quality, and future domain encoder scaling if data
 quality allows.
@@ -1422,7 +1481,7 @@ quality allows.
 
 | Constraint | Implementation |
 |------------|---------------|
-| Sub-4B parameters, single GPU | ~1.16B total; fits on A100 40GB with INT8 quantization |
+| Sub-4B parameters, single GPU | ~1.16B total; QAT-trained from epoch zero via wNa8o8 schema; INT8 ONNX export is a format conversion of already-quantization-tolerant weights, not a precision-degrading post-hoc compression. |
 | Real-time SOC latency | ≤120ms target; ONNX INT8 on A100; early-exit F3 fast path |
 | No exploit synthesis in weights | No decoder head produces exploit code; vocabulary mask is structural (logit-level), not policy |
 | No generative free-text attack tooling | Constrained decoder: hard vocabulary mask; max 256 tokens; AFN-only cross-attention source |

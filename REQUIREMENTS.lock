@@ -4,7 +4,7 @@
     "version": "1.0",
     "locked_at": "2026-06-07",
     "spec_file": "ARCHITECTURE.md",
-    "spec_sha256": "45f28130a8d1779bf92e038d0961785f164b03c52e20c861c3a3946f05966f79",
+    "spec_sha256": "cd82b4dfc2e5df353b10f37893447626582f1029819e47ade738e22cf3c1b53e",
     "note": "All values in this file are locked. Any change requires operator sign-off and a new REQUIREMENTS.lock with updated spec_sha256. An implementation that contradicts a value in this file is non-compliant."
   },
 
@@ -72,8 +72,33 @@
   },
 
   "architecture": {
-    "total_parameters_estimated": "1_160_000_000",
+    "total_parameters_estimated": "1_175_000_000",
     "shared_d_model": 1024,
+
+    "qat": {
+      "schema": "wNa8o8",
+      "initialized_from_epoch": 0,
+      "post_training_quantization_used": false,
+      "decoder_channel_wise_bits": 2,
+      "kv_cache_bits": 8,
+      "kv_cache_scope": "all_domain_encoders_and_fusion_layer",
+      "vram_target_encoder_fusion_gb": 4,
+      "vram_target_decoder_gb": 2
+    },
+
+    "mtp_drafter": {
+      "architecture": "shallow_transformer",
+      "decoder_layers": 2,
+      "d_model": 512,
+      "params_approx": "15M_incremental_over_shared_embedding_weights",
+      "shared_with_primary": ["tokenizer", "embedding_weights"],
+      "inference_device": "CPU",
+      "primary_model_device": "GPU",
+      "latency_reduction_factor_decoder_approx": "3x",
+      "decoder_latency_ms_with_drafter": 50,
+      "decoder_latency_ms_without_drafter": 90,
+      "trained_stages": [1, 2, 3, 4]
+    },
 
     "embedding_layer": {
       "vocabulary_size": 50428,
@@ -97,7 +122,13 @@
         "attention_heads": 16,
         "ffn_width": 4096,
         "params_approx": "200M",
-        "dcat_layers": [7, 8]
+        "dcat_layers": [7, 8],
+        "context_window_default_tokens": 32768,
+        "context_window_max_tokens": 262144,
+        "attention_pattern": "interleaved_RoPE_NoPE",
+        "local_window_tokens": 4096,
+        "global_layers_stride": 4,
+        "global_layer_positional_encoding": "NoPE"
       },
       "forensics_provenance": {
         "layers": 12,
@@ -105,7 +136,13 @@
         "attention_heads": 16,
         "ffn_width": 4096,
         "params_approx": "200M",
-        "dcat_layers": [7, 8]
+        "dcat_layers": [7, 8],
+        "context_window_default_tokens": 32768,
+        "context_window_max_tokens": 262144,
+        "attention_pattern": "interleaved_RoPE_NoPE",
+        "local_window_tokens": 4096,
+        "global_layers_stride": 4,
+        "global_layer_positional_encoding": "NoPE"
       },
       "cti_stix": {
         "layers": 8,
@@ -113,7 +150,8 @@
         "attention_heads": 12,
         "ffn_width": 3072,
         "params_approx": "85M",
-        "dcat_layers": []
+        "dcat_layers": [],
+        "context_window_tokens": 4096
       },
       "vulnerability_risk": {
         "layers": 8,
@@ -121,7 +159,8 @@
         "attention_heads": 12,
         "ffn_width": 3072,
         "params_approx": "85M",
-        "dcat_layers": []
+        "dcat_layers": [],
+        "context_window_tokens": 4096
       },
       "identity_access": {
         "layers": 6,
@@ -129,7 +168,8 @@
         "attention_heads": 12,
         "ffn_width": 3072,
         "params_approx": "65M",
-        "dcat_layers": []
+        "dcat_layers": [],
+        "context_window_tokens": 4096
       },
       "incident_response": {
         "layers": 6,
@@ -137,7 +177,8 @@
         "attention_heads": 12,
         "ffn_width": 3072,
         "params_approx": "65M",
-        "dcat_layers": []
+        "dcat_layers": [],
+        "context_window_tokens": 4096
       },
       "compliance": {
         "layers": 4,
@@ -145,7 +186,8 @@
         "attention_heads": 8,
         "ffn_width": 2048,
         "params_approx": "28M",
-        "dcat_layers": []
+        "dcat_layers": [],
+        "context_window_tokens": 4096
       }
     },
 
@@ -364,7 +406,10 @@
       "sweep": [32, 64, 128, 256, 512],
       "success_FNR_max": 0.08,
       "success_VRAM_max_GB": 40,
-      "success_latency_overhead_max_ms": 15
+      "success_latency_overhead_max_ms": 15,
+      "secondary_hypothesis": "NoPE_global_layers_gradient_noise_may_be_binding_constraint_before_VRAM_ceiling",
+      "fourth_metric": "contrastive_loss_gradient_variance_NoPE_layers",
+      "fourth_metric_flag_threshold": "2x_variance_at_N32_baseline"
     },
     "EXPERIMENT-2": {
       "blocks": ["kill_chain_state_tracking", "reasoning_representation", "decision_state_classifier", "full_training_schedule"],
