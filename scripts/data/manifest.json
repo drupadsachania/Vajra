@@ -1,0 +1,78 @@
+{
+  "_meta": {
+    "description": "Vajra pretraining corpus acquisition manifest. Ordered by priority. HuggingFace sources are pulled by pull_hf_datasets.py; external sources require form-based access requests (see scripts/data/README.md).",
+    "staging_dir": "data/raw",
+    "ip_policy": "All data must be normalized to RFC1918/RFC5737 addresses before leaving data/raw (enforced by vajra.training.data.TrainingExampleLoader)."
+  },
+  "huggingface": [
+    {
+      "priority": 1,
+      "repo_id": "s0u9ata/security-kg",
+      "domains": ["cti_stix", "vulnerability_risk", "compliance"],
+      "use": "Knowledge-graph triples for TransE/RotatE ontology embeddings (Path C) + CTI/vuln/compliance encoder pretraining",
+      "configs": "all",
+      "notes": "Pull all 28 configs."
+    },
+    {
+      "priority": 2,
+      "repo_id": "witfoo/precinct6-cybersecurity",
+      "domains": ["detection_network", "forensics_provenance", "incident_response"],
+      "use": "Labeled SOC signal telemetry for Detection/Forensics/IR encoders",
+      "configs": ["signals"],
+      "notes": "Only the signals config is needed."
+    },
+    {
+      "priority": 5,
+      "repo_id": "tumeteor/Security-TTP-Mapping",
+      "domains": ["cti_stix"],
+      "use": "Text-to-ATT&CK-technique mapping pairs for the 716-class technique head",
+      "configs": "all",
+      "notes": "LICENSE CHECK REQUIRED: verify CC terms permit redistribution under Apache 2.0 corpus before publishing normalized splits."
+    },
+    {
+      "priority": 6,
+      "repo_id": "clydeiii/cybersecurity",
+      "domains": ["cti_stix"],
+      "use": "APT threat-actor reports; requires NER extraction pipeline before tokenization (Path A)",
+      "configs": "all",
+      "notes": "Raw text — Stage 2 CoT distillation source, not direct pretraining."
+    },
+    {
+      "priority": 7,
+      "repo_id": "AlicanKiraz0/Cybersecurity-Dataset-Fenrir-v2.1",
+      "domains": ["incident_response", "compliance"],
+      "use": "IR/compliance chain-of-thought traces for Stage 2 distillation",
+      "configs": "all",
+      "notes": null
+    }
+  ],
+  "external_form_request": [
+    {
+      "priority": 3,
+      "name": "DARPA OpTC",
+      "domains": ["forensics_provenance"],
+      "use": "6-day APT scenario eCAR traces (subsampled, not the 17.4B-event benign bulk)",
+      "access": "Data sharing agreement via DARPA program page / Friends-of-OpTC GitHub",
+      "lead_time": "1-2 weeks",
+      "redistribution": "NEVER publish raw OpTC data — check agreement terms"
+    },
+    {
+      "priority": 4,
+      "name": "LANL Unified Host and Network / Auth",
+      "domains": ["identity_access"],
+      "use": "Authentication event sequences (hundreds of millions of events, structured CSV)",
+      "access": "Request form at csr.lanl.gov/data",
+      "lead_time": "1-2 weeks",
+      "redistribution": "Check terms before publishing derivatives"
+    }
+  ],
+  "synthetic": [
+    {
+      "priority": 8,
+      "name": "Caldera / Atomic Red Team runs",
+      "domains": ["identity_access", "detection_network"],
+      "use": "Labeled lateral-movement and credential-access telemetry to close the identity-domain gap",
+      "generation": "MITRE Caldera operations + Atomic Red Team tests against instrumented lab range; RFC1918 addressing by construction"
+    }
+  ]
+}
