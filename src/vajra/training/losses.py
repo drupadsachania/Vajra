@@ -52,20 +52,21 @@ class FMLMLoss(nn.Module):
         effective_labels = labels.clone()
         effective_labels[sentinel_mask] = self.ignore_index
 
-        loss = F.cross_entropy(
-            logits.reshape(B * S, V),
-            effective_labels.reshape(B * S),
-            ignore_index=self.ignore_index,
-            reduction="mean",
-        )
-        return loss
+        # Index only the ~15% valid positions rather than computing full-vocab CE
+        # on all B*S positions (most of which are masked anyway).
+        flat_logits = logits.reshape(B * S, V)
+        flat_labels = effective_labels.reshape(B * S)
+        valid = flat_labels != self.ignore_index
+        if not valid.any():
+            return flat_logits.flatten()[0] * 0.0
+        return F.cross_entropy(flat_logits[valid], flat_labels[valid], reduction="mean")
 
 
 class KillChainLoss(nn.Module):
     """Next-state cross-entropy loss for the 7-state kill-chain semiautomaton.
 
-    Applies a validity mask: only s→s and s→s+1 transitions are valid.
-    Invalid transitions get their target probability zeroed.
+    When `current_states` is provided the transition mask is applied: only
+    s→s and s→s+1 transitions are valid; all other logits are set to −∞.
     """
 
     N_STATES = 7
@@ -74,15 +75,21 @@ class KillChainLoss(nn.Module):
         self,
         state_logits: torch.Tensor,
         target_states: torch.Tensor,
+        current_states: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
-        state_logits  : (batch, 7)
-        target_states : (batch,) — next state index 0..6
+        state_logits   : (batch, 7)
+        target_states  : (batch,) — next state index 0..6
+        current_states : (batch,) — current state IDs (enables validity mask)
 
         Returns scalar loss.
         """
-        loss = F.cross_entropy(state_logits, target_states, reduction="mean")
-        return loss
+        if current_states is not None:
+            from vajra.fusion.kill_chain import _build_transition_mask
+            mask = _build_transition_mask().to(state_logits.device)  # (7, 7)
+            allowed = mask[current_states]   # (batch, 7) — 0.0 allowed, -inf blocked
+            state_logits = state_logits + allowed
+        return F.cross_entropy(state_logits, target_states, reduction="mean")
 
 
 class MITREOntologyLoss(nn.Module):
@@ -170,15 +177,16 @@ class BaNELLoss(nn.Module):
         Returns scalar loss (0 when null_mask is all-False).
         """
         if not null_mask.any():
-            # Return a zero loss that still requires grad so training loop is uniform
-            return logits_observed.sum() * 0.0
+            # Scalar zero with grad connection; avoids full-tensor reduction.
+            return logits_observed.flatten()[0] * 0.0
 
-        p_base = F.softmax(logits_baseline[null_mask], dim=-1)   # (N, vocab)
-        p_obs  = F.softmax(logits_observed[null_mask], dim=-1)   # (N, vocab)
+        # Detach baseline so gradient does not flow into the EMA-frozen stream.
+        # Use log_softmax for numerical stability (avoids log(p + eps) in fp16).
+        log_b = F.log_softmax(logits_baseline[null_mask].detach(), dim=-1)  # (N, V)
+        log_o = F.log_softmax(logits_observed[null_mask], dim=-1)            # (N, V)
 
-        # KL(P_base || P_obs) = Σ p_base * log(p_base / p_obs)
-        eps = 1e-10
-        kl = (p_base * (torch.log(p_base + eps) - torch.log(p_obs + eps))).sum(dim=-1)
+        # KL(P_base || P_obs) via F.kl_div (expects log-space input, linear target).
+        kl = F.kl_div(log_o, log_b.exp(), reduction="none").sum(dim=-1)  # (N,)
         return self.current_lambda * kl.mean()
 
 
@@ -219,8 +227,9 @@ class DPOLoss(nn.Module):
 
         pi_w  = _seq_log_prob(logits_w, labels_w)
         pi_l  = _seq_log_prob(logits_l, labels_l)
-        ref_w = _seq_log_prob(ref_logits_w, labels_w)
-        ref_l = _seq_log_prob(ref_logits_l, labels_l)
+        # Detach reference logits: gradient must not flow into the reference model.
+        ref_w = _seq_log_prob(ref_logits_w.detach(), labels_w)
+        ref_l = _seq_log_prob(ref_logits_l.detach(), labels_l)
 
         logits_dpo = self.beta * ((pi_w - ref_w) - (pi_l - ref_l))
         loss = -F.logsigmoid(logits_dpo).mean()

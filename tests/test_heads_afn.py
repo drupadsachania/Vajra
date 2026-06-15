@@ -43,10 +43,19 @@ class TestATTACKClassifier:
         out = clf(x)
         assert out.shape == (2, 716)
 
-    def test_probabilities_in_01(self):
+    def test_forward_returns_logits(self):
+        """forward() must return raw logits (unbounded), not sigmoid probabilities."""
         clf = ATTACKClassifier(d_model=D)
         x = torch.randn(4, D)
-        probs = clf(x)
+        logits = clf(x)
+        # Raw logits from a Linear are unbounded — some should be outside [0, 1].
+        assert not ((logits >= 0).all() and (logits <= 1).all()), \
+            "forward() returned values in [0,1]; it should return raw logits"
+
+    def test_predict_returns_probabilities_in_01(self):
+        clf = ATTACKClassifier(d_model=D)
+        x = torch.randn(4, D)
+        probs = torch.sigmoid(clf(x))
         assert (probs >= 0).all() and (probs <= 1).all()
 
     def test_binary_predictions(self):

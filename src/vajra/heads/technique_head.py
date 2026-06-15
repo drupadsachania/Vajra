@@ -23,13 +23,13 @@ class ATTACKClassifier(nn.Module):
     def forward(self, fusion_cls: torch.Tensor) -> torch.Tensor:
         """
         fusion_cls : (batch, d_model)
-        Returns    : (batch, 716) — sigmoid probabilities
+        Returns    : (batch, 716) — raw logits (use loss() for training, predict() for inference)
         """
-        return torch.sigmoid(self.head(fusion_cls))
+        return self.head(fusion_cls)
 
     def predict(self, fusion_cls: torch.Tensor) -> torch.Tensor:
         """Returns binary multi-label predictions at threshold τ=0.35."""
-        probs = self.forward(fusion_cls)
+        probs = torch.sigmoid(self.forward(fusion_cls))
         return (probs > self.THRESHOLD).float()
 
     @staticmethod

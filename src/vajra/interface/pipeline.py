@@ -20,7 +20,7 @@ from vajra.encoders.domain_encoders import build_domain_encoders
 from vajra.fusion.epistemic_fusion import EpistemicFusionLayer
 from vajra.heads.dag_head import EvidenceDAGHead
 from vajra.heads.technique_head import ATTACKClassifier
-from vajra.heads.decision_head import DecisionStateClassifier, apply_dcat_override
+from vajra.heads.decision_head import apply_dcat_override
 from vajra.decoder.decoder import ConstrainedDecoder
 
 from .types import (
@@ -33,14 +33,6 @@ DOMAIN_ORDER = [
     "detection_network", "forensics_provenance", "cti_stix",
     "vulnerability_risk", "identity_access", "incident_response", "compliance",
 ]
-
-# d_model for each domain encoder (matches locked config)
-DOMAIN_D_MODEL = {
-    "detection_network": 1024, "forensics_provenance": 1024,
-    "cti_stix": 768, "vulnerability_risk": 768,
-    "identity_access": 768, "incident_response": 768,
-    "compliance": 512,
-}
 
 
 class VajraInferencePipeline(nn.Module):
@@ -84,9 +76,8 @@ class VajraInferencePipeline(nn.Module):
         self.afn = ActivationFlowNetwork(top_k=cfg.afn.top_k)
         self.fusion = EpistemicFusionLayer(cfg)
 
-        self.dag_head       = EvidenceDAGHead(n_domains=7, d_model=1024)
-        self.attack_head    = ATTACKClassifier(d_model=1024)
-        self.decision_head  = DecisionStateClassifier(d_model=1024)
+        self.dag_head    = EvidenceDAGHead(n_domains=7, d_model=1024)
+        self.attack_head = ATTACKClassifier(d_model=1024)
         self.decoder = ConstrainedDecoder(
             vocab_size=cfg.embedding.vocabulary_size,
             d_model=1024, n_heads=4, n_layers=2, ffn_width=256, dropout=0.0,
@@ -110,9 +101,8 @@ class VajraInferencePipeline(nn.Module):
         self.afn = ActivationFlowNetwork(top_k=cfg.afn.top_k)
         self.fusion = EpistemicFusionLayer(cfg)
 
-        self.dag_head       = EvidenceDAGHead(n_domains=7, d_model=cfg.shared_d_model)
-        self.attack_head    = ATTACKClassifier(d_model=cfg.shared_d_model)
-        self.decision_head  = DecisionStateClassifier(d_model=cfg.shared_d_model)
+        self.dag_head    = EvidenceDAGHead(n_domains=7, d_model=cfg.shared_d_model)
+        self.attack_head = ATTACKClassifier(d_model=cfg.shared_d_model)
         self.decoder = ConstrainedDecoder(
             vocab_size=cfg.embedding.vocabulary_size,
             d_model=cfg.shared_d_model,
@@ -211,7 +201,7 @@ class VajraInferencePipeline(nn.Module):
         confidence = float(decision_state_probs[0].max().item())
 
         # --- DCAT override (§6.4) ---
-        # Mean DCAT divergence across the DCAT-bearing encoders (Detection,
+        # Max DCAT divergence across the DCAT-bearing encoders (Detection,
         # Forensics). A high null-state divergence forces escalation when the
         # decision would otherwise DEFER (2) or be INSUFFICIENT_CONTEXT (3).
         max_dcat_divergence = 0.0
@@ -226,10 +216,11 @@ class VajraInferencePipeline(nn.Module):
 
         # --- ATT&CK technique head ---
         fused_cls = fusion_input[:, 0, :]  # use first domain CLS as proxy
-        technique_probs = self.attack_head(fused_cls)[0]  # (716,)
+        technique_logits = self.attack_head(fused_cls)   # (1, 716) — raw logits
+        technique_probs = torch.sigmoid(technique_logits)[0]  # (716,)
         technique_ids = [
             f"T{1000 + i}" for i, p in enumerate(technique_probs.tolist())
-            if p > 0.35
+            if p > self.attack_head.THRESHOLD
         ]
 
         # --- Evidence DAG head ---

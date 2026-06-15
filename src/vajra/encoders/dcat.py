@@ -106,7 +106,6 @@ class DCATBlock(nn.Module):
 
         self.rope = RotaryEmbedding(self.head_dim)
         self.ffn  = SwiGLUFFN(d_model, ffn_width)
-        self.ln_ffn = nn.LayerNorm(d_model)
         self.dropout = nn.Dropout(dropout)
         self.final_ln = nn.LayerNorm(d_model)
 

@@ -26,11 +26,14 @@ FAST_EXIT_INSUF_THRESH  = 0.85  # p(class=3) > this → early exit
 
 @dataclass
 class EarlyExitResult:
-    decision_logits: torch.Tensor   # (batch, 4)
-    decision_probs:  torch.Tensor   # (batch, 4)
-    kill_chain_state: torch.Tensor  # (batch,) current KC state
+    decision_logits: torch.Tensor        # (batch, 4) — F3 on early-exit, F6 otherwise
+    decision_probs:  torch.Tensor        # (batch, 4)
+    kill_chain_state: torch.Tensor       # (batch,) current KC state
     early_exit: bool
-    exit_block: int                 # 3 for F3 early-exit, 6 for F6
+    exit_block: int                      # 3 for F3 early-exit, 6 for F6
+    # F3 tap always populated (hard constraint: markers at F3 and F6 on every call)
+    f3_logits: torch.Tensor | None = None  # (batch, 4)
+    f3_probs:  torch.Tensor | None = None  # (batch, 4)
 
 
 class EpistemicFusionLayer(nn.Module):
@@ -122,6 +125,8 @@ class EpistemicFusionLayer(nn.Module):
                         kill_chain_state=kc_state,
                         early_exit=True,
                         exit_block=3,
+                        f3_logits=f3_logits,
+                        f3_probs=f3_probs,
                     )
 
         # F6 tap (all 6 blocks completed)
@@ -135,4 +140,6 @@ class EpistemicFusionLayer(nn.Module):
             kill_chain_state=kc_state,
             early_exit=False,
             exit_block=6,
+            f3_logits=f3_logits,
+            f3_probs=f3_probs,
         )

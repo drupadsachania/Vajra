@@ -65,11 +65,16 @@ class ContiFormerEncoding(nn.Module):
         return torch.exp(self.log_freqs)
 
     def phi(self, t: torch.Tensor) -> torch.Tensor:
-        """t : (batch, seq) → φ(t) : (batch, seq, 256)."""
-        w = self.freqs  # (128,)
-        # t_unsqueezed: (batch, seq, 1)
-        wt = t.unsqueeze(-1) * w  # (batch, seq, 128)
-        return torch.cat([torch.cos(wt), torch.sin(wt)], dim=-1)  # (batch, seq, 256)
+        """t : (batch, seq) → φ(t) : (batch, seq, 256).
+
+        Computation done in float64 to avoid catastrophic precision loss:
+        Unix-epoch seconds (~1.7e9) × ω up to 1e3 ≈ 1e12, which exceeds
+        float32's ~7 significant digits, making cos/sin pure noise otherwise.
+        """
+        w = self.freqs.double()              # (128,)
+        wt = t.double().unsqueeze(-1) * w   # (batch, seq, 128)
+        out = torch.cat([wt.cos(), wt.sin()], dim=-1)  # (batch, seq, 256)
+        return out.to(t.dtype if t.is_floating_point() else torch.float32)
 
     def forward(
         self,

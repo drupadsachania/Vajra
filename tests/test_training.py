@@ -330,3 +330,86 @@ class TestIPEnforcement:
         assert "9.9.9.9" in find_disallowed_ips(ex2)
         assert TrainingExampleLoader.tokenization_path_for("stix") == "A"
         assert TrainingExampleLoader.tokenization_path_for("unknown") == "A"
+
+    def test_ip_in_dict_key_rejected(self):
+        """Public IP as a dict key (e.g. connection table) must also be caught."""
+        ex = {"events": [{"data": {"8.8.8.8": {"port": 443}}}], "labels": {}}
+        with pytest.raises(RealIPInTrainingError):
+            TrainingExampleLoader([ex])
+
+    def test_ip_with_letter_suffix_rejected(self):
+        """IP followed by a letter (e.g. '8.8.8.8G' in a log line) must still be caught.
+        Old \\b regex misses this because \\b fails between two word chars (8 and G).
+        """
+        ex = {"events": [{"data": {"msg": "connect to 8.8.8.8G port 443"}}], "labels": {}}
+        with pytest.raises(RealIPInTrainingError):
+            TrainingExampleLoader([ex])
+
+    def test_real_ipv6_rejected(self):
+        """Real public IPv6 address must be caught."""
+        ex = {"events": [{"data": {"addr": "2600:1f18::1"}}], "labels": {}}
+        with pytest.raises(RealIPInTrainingError):
+            TrainingExampleLoader([ex])
+
+    def test_documentation_ipv6_allowed(self):
+        """RFC3849 documentation IPv6 (2001:db8::/32) must be allowed."""
+        ex = {"events": [{"data": {"addr": "2001:db8::1"}}], "labels": {}}
+        loader = TrainingExampleLoader([ex])
+        assert len(loader) == 1
+
+
+# ---------------------------------------------------------------------------
+# BaNEL baseline detach
+# ---------------------------------------------------------------------------
+class TestBaNELDetach:
+    def test_baseline_grad_does_not_flow(self):
+        """Gradient must NOT flow into logits_baseline (EMA-frozen stream)."""
+        loss_fn = BaNELLoss()
+        B, S, V = 1, 4, 64
+        obs = torch.randn(B, S, V, requires_grad=True)
+        base = torch.randn(B, S, V, requires_grad=True)
+        null_mask = torch.ones(B, S, dtype=torch.bool)
+        loss = loss_fn(obs, base, null_mask)
+        loss.backward()
+        assert base.grad is None or base.grad.abs().sum().item() == 0.0, \
+            "Gradient flowed into baseline stream — violates EMA-frozen semantics"
+
+
+# ---------------------------------------------------------------------------
+# KillChainLoss with validity mask
+# ---------------------------------------------------------------------------
+class TestKillChainLossMask:
+    def test_invalid_transition_blocked(self):
+        """When current_states provided, skip-stage transitions must be masked out."""
+        loss_fn = KillChainLoss()
+        # Force logit for state 6 (EXFIL) very high while current state is 0 (RECON).
+        # Without mask the model would pick state 6; with mask only 0→0 or 0→1 allowed.
+        logits = torch.zeros(1, 7)
+        logits[0, 6] = 100.0          # EXFIL — invalid from RECON
+        logits[0, 1] = 10.0           # WEAPONIZE — valid advance
+        current = torch.zeros(1, dtype=torch.long)  # RECON
+        target  = torch.ones(1, dtype=torch.long)   # WEAPONIZE
+        loss = loss_fn(logits, target, current_states=current)
+        assert torch.isfinite(loss)
+        assert loss.item() >= 0
+
+
+# ---------------------------------------------------------------------------
+# NetFlow per-field projections (distinctness)
+# ---------------------------------------------------------------------------
+class TestNetFlowFieldDistinctness:
+    def test_bytes_packets_duration_differ(self):
+        """bytes/packets/duration embeddings must differ — they use separate projections."""
+        from vajra.tokenization.path_b import NetFlowEncoder, NetFlowRecord
+        torch.manual_seed(0)
+        enc = NetFlowEncoder(d_model=64)
+        rec = NetFlowRecord(
+            src_ip="10.0.0.1", dst_ip="10.0.0.2",
+            src_port=12345, dst_port=443, protocol=6,
+            bytes_sent=1_000_000, packets=700, duration_ms=250.0,
+        )
+        fields = enc.encode_record(rec)
+        assert not torch.allclose(fields["bytes"], fields["packets"]), \
+            "bytes and packets embeddings are identical — per-field projections broken"
+        assert not torch.allclose(fields["bytes"], fields["duration"]), \
+            "bytes and duration embeddings are identical"

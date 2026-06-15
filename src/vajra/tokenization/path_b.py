@@ -6,6 +6,7 @@ projection to d_model=1024.
 
 from __future__ import annotations
 
+import ipaddress
 import torch
 import torch.nn as nn
 from dataclasses import dataclass
@@ -31,7 +32,6 @@ _RFC1918_BLOCKS = [
 
 
 def _is_rfc1918(ip_str: str) -> bool:
-    import ipaddress
     try:
         addr = ipaddress.ip_address(ip_str)
     except ValueError:
@@ -44,7 +44,6 @@ def _is_rfc1918(ip_str: str) -> bool:
 
 def _ip_to_tensor(ip_str: str) -> torch.Tensor:
     """RFC1918 /24-level one-hot (256 dims) + 1 external-indicator bit → 257 dims."""
-    import ipaddress
     vec = torch.zeros(257)
     try:
         addr = ipaddress.ip_address(ip_str)
@@ -145,11 +144,19 @@ class IpEncoder(nn.Module):
         return _ip_to_tensor(ip_str)
 
 
+_RFC1918_NETWORKS = [
+    ipaddress.ip_network(f"{b}/{p}", strict=False)
+    for b, p in _RFC1918_BLOCKS
+]
+
+
 class NetFlowEncoder(nn.Module):
     """NetFlow record → 8 per-field projections, each → d_model.
 
     Fields (8): src_ip, dst_ip, src_port, dst_port, protocol,
                 bytes_sent, packets, duration_ms.
+    Scalar fields (bytes, packets, duration) use separate Linear(1, d_model)
+    projections on log1p-scaled values so the model can distinguish them.
     """
 
     PORT_VOCAB = 65536
@@ -161,24 +168,27 @@ class NetFlowEncoder(nn.Module):
         self.port_embed = nn.Embedding(self.PORT_VOCAB, self.PORT_DIM)
         self.port_proj = nn.Linear(self.PORT_DIM, d_model)
         self.proto_proj = nn.Linear(256, d_model)   # protocol 0-255 one-hot
-        self.scalar_proj = nn.Linear(3, d_model)    # bytes, packets, duration
+        # Separate projections for each scalar so the model can distinguish them.
+        self.bytes_proj    = nn.Linear(1, d_model)
+        self.packets_proj  = nn.Linear(1, d_model)
+        self.duration_proj = nn.Linear(1, d_model)
 
     def encode_record(self, rec: NetFlowRecord) -> dict[str, torch.Tensor]:
         """Return dict of 8 per-field tensors, each shape (1, d_model)."""
-        src_ip_t = _ip_to_tensor(rec.src_ip).unsqueeze(0)
-        dst_ip_t = _ip_to_tensor(rec.dst_ip).unsqueeze(0)
+        device = self.bytes_proj.weight.device
+        src_ip_t = _ip_to_tensor(rec.src_ip).unsqueeze(0).to(device)
+        dst_ip_t = _ip_to_tensor(rec.dst_ip).unsqueeze(0).to(device)
 
-        src_port_t = torch.tensor([rec.src_port], dtype=torch.long)
-        dst_port_t = torch.tensor([rec.dst_port], dtype=torch.long)
+        src_port_t = torch.tensor([rec.src_port], dtype=torch.long, device=device)
+        dst_port_t = torch.tensor([rec.dst_port], dtype=torch.long, device=device)
 
-        proto_t = torch.zeros(1, 256)
+        proto_t = torch.zeros(1, 256, device=device)
         proto_t[0, min(rec.protocol, 255)] = 1.0
 
-        scalars = torch.tensor([[
-            float(rec.bytes_sent),
-            float(rec.packets),
-            float(rec.duration_ms),
-        ]])
+        # log1p prevents gradient/activation blow-up on large byte counts.
+        bytes_t    = torch.tensor([[float(rec.bytes_sent)]], device=device).log1p()
+        packets_t  = torch.tensor([[float(rec.packets)]], device=device).log1p()
+        duration_t = torch.tensor([[float(rec.duration_ms)]], device=device).log1p()
 
         return {
             "src_ip":    self.ip_enc(src_ip_t),
@@ -186,9 +196,9 @@ class NetFlowEncoder(nn.Module):
             "src_port":  self.port_proj(self.port_embed(src_port_t)),
             "dst_port":  self.port_proj(self.port_embed(dst_port_t)),
             "protocol":  self.proto_proj(proto_t),
-            "bytes":     self.scalar_proj(scalars),
-            "packets":   self.scalar_proj(scalars),
-            "duration":  self.scalar_proj(scalars),
+            "bytes":     self.bytes_proj(bytes_t),
+            "packets":   self.packets_proj(packets_t),
+            "duration":  self.duration_proj(duration_t),
         }
 
     def forward(self, rec: NetFlowRecord) -> torch.Tensor:

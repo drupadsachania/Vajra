@@ -180,3 +180,29 @@ class TestEpistemicFusionLayer:
         fusion = EpistemicFusionLayer(CFG)
         n = sum(p.numel() for p in fusion.parameters())
         assert 60_000_000 <= n <= 120_000_000, f"Fusion param count {n:,} outside expected range"
+
+    def test_f3_logits_always_populated_on_full_path(self):
+        """F3 markers must be present even when early-exit does NOT fire (hard constraint)."""
+        fusion = self._make_fusion()
+        x = torch.randn(2, 7, 64)
+        result = fusion(x)
+        assert not result.early_exit, "Expected non-early-exit path for this test"
+        assert result.f3_logits is not None, "f3_logits missing on full (F6) path"
+        assert result.f3_probs is not None,  "f3_probs missing on full (F6) path"
+        assert result.f3_logits.shape == (2, 4)
+        assert result.f3_probs.shape  == (2, 4)
+
+    def test_f3_logits_populated_on_early_exit_path(self):
+        """F3 markers must also be present when early-exit fires."""
+        from vajra.config import VajraConfig
+        fusion = EpistemicFusionLayer(VajraConfig())
+        fusion.eval()
+        with torch.no_grad():
+            fusion.f3_head.weight.zero_()
+            fusion.f3_head.bias.zero_()
+            fusion.f3_head.bias[2] = 20.0  # class=2 logit dominates → early exit
+        x = torch.randn(1, 7, 1024)
+        result = fusion(x)
+        assert result.early_exit
+        assert result.f3_logits is not None
+        assert result.f3_probs is not None

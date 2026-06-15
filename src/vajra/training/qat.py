@@ -46,7 +46,8 @@ class KVCacheQuantizer(nn.Module):
             self.fake_quant = nn.Identity()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.linear(self.fake_quant(x))
+        # Fake-quant the projection *output* (what would be cached), not the input.
+        return self.fake_quant(self.linear(x))
 
 
 class QATLinear(nn.Module):

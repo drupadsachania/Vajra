@@ -118,6 +118,8 @@ class ConstrainedDecoder(nn.Module):
         n_layers: int = 8,
         ffn_width: int = 4096,
         dropout: float = 0.1,
+        tokenizer=None,
+        extra_blocked_ids=None,
     ):
         super().__init__()
         self.d_model   = d_model
@@ -134,7 +136,9 @@ class ConstrainedDecoder(nn.Module):
         self.final_ln = nn.LayerNorm(d_model)
         self.lm_head  = nn.Linear(d_model, vocab_size, bias=False)
 
-        self.vocab_mask = VocabularyMask(vocab_size)
+        self.vocab_mask = VocabularyMask(
+            vocab_size, tokenizer=tokenizer, extra_blocked_ids=extra_blocked_ids
+        )
 
     def forward(
         self,

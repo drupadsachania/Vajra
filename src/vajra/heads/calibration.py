@@ -6,6 +6,7 @@ ConformalPredictor: threshold calibration at 90% and 95% coverage on OOD set.
 
 from __future__ import annotations
 
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -41,12 +42,12 @@ class ConformalPredictor:
     probability exceeds the calibrated threshold.
     """
 
-    def __init__(self, coverage_targets: list[float] = None):
+    def __init__(self, coverage_targets: list[float] | None = None):
         self.coverage_targets = coverage_targets or [0.90, 0.95]
-        self.thresholds: dict[float, float] = {c: 1.0 for c in self.coverage_targets}
+        self.thresholds: dict[float, float] = {c: 0.0 for c in self.coverage_targets}
 
     def calibrate(self, softmax_scores: torch.Tensor, true_labels: torch.Tensor):
-        """Fit thresholds from calibration set.
+        """Fit thresholds from calibration set using split-conformal quantile.
 
         softmax_scores : (N, C) probabilities on OOD calibration set
         true_labels    : (N,) long tensor of true class indices
@@ -56,7 +57,8 @@ class ConformalPredictor:
         sorted_scores, _ = true_probs.sort()
 
         for coverage in self.coverage_targets:
-            idx = max(0, int((1 - coverage) * N) - 1)
+            # Finite-sample correction: ⌈(N+1)(1−coverage)⌉ − 1
+            idx = min(N - 1, max(0, math.ceil((N + 1) * (1 - coverage)) - 1))
             self.thresholds[coverage] = sorted_scores[idx].item()
 
     def predict_set(
@@ -64,19 +66,15 @@ class ConformalPredictor:
     ) -> list[list[int]]:
         """Return prediction sets for a batch.
 
+        The set is {i : p_i >= threshold} — all classes whose probability
+        meets or exceeds the calibrated threshold (split-conformal guarantee).
+
         probs : (batch, C)
         Returns list of class-index lists, one per example.
         """
-        threshold = self.thresholds.get(coverage, 1.0)
+        threshold = self.thresholds.get(coverage, 0.0)
         result = []
         for p in probs:
-            sorted_idx = p.argsort(descending=True)
-            pred_set = []
-            cum = 0.0
-            for idx in sorted_idx:
-                pred_set.append(idx.item())
-                cum += p[idx].item()
-                if p[idx].item() >= threshold:
-                    break
-            result.append(pred_set)
+            idx = (p >= threshold).nonzero(as_tuple=True)[0].tolist()
+            result.append(idx if idx else [int(p.argmax())])
         return result

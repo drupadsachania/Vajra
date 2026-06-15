@@ -40,19 +40,27 @@ TOKENIZATION_PATH_MAP = {
 # Only RFC1918 private space and RFC5737 documentation ranges are permitted in
 # training data (REQUIREMENTS.lock: real_ips_in_training = false). Loopback and
 # unspecified addresses are also allowed as benign non-routable literals.
-_ALLOWED_IP_NETWORKS = [
+_ALLOWED_IPv4_NETWORKS = [
     ipaddress.ip_network("10.0.0.0/8"),
     ipaddress.ip_network("172.16.0.0/12"),
     ipaddress.ip_network("192.168.0.0/16"),
     ipaddress.ip_network("192.0.2.0/24"),     # RFC5737 TEST-NET-1
     ipaddress.ip_network("198.51.100.0/24"),  # RFC5737 TEST-NET-2
     ipaddress.ip_network("203.0.113.0/24"),   # RFC5737 TEST-NET-3
-    ipaddress.ip_network("127.0.0.0/8"),       # loopback
-    ipaddress.ip_network("0.0.0.0/32"),        # unspecified
+    ipaddress.ip_network("127.0.0.0/8"),      # loopback
+    ipaddress.ip_network("0.0.0.0/32"),       # unspecified
 ]
+_ALLOWED_IPv6_NETWORKS = [
+    ipaddress.ip_network("::1/128"),            # loopback
+    ipaddress.ip_network("fc00::/7"),           # unique-local
+    ipaddress.ip_network("2001:db8::/32"),      # RFC3849 documentation
+]
+_ALLOWED_IP_NETWORKS = _ALLOWED_IPv4_NETWORKS + _ALLOWED_IPv6_NETWORKS
 
-# Conservative IPv4 dotted-quad matcher; candidates are confirmed via ipaddress.
-_IPV4_RE = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b")
+# IPv4: require non-word-char boundary (fixes host8.8.8.8 false-negatives).
+_IPV4_RE = re.compile(r"(?<![0-9A-Za-z])\d{1,3}(?:\.\d{1,3}){3}(?![0-9])")
+# IPv6 candidate heuristic; confirmed via ipaddress.ip_address().
+_IPV6_RE = re.compile(r"(?<![0-9A-Za-z:])(?:[0-9A-Fa-f]{1,4}:){2,7}[0-9A-Fa-f:.]{1,39}")
 
 
 class RealIPInTrainingError(ValueError):
@@ -68,11 +76,13 @@ def _is_allowed_ip(ip_str: str) -> bool:
 
 
 def _iter_strings(value) -> Iterator[str]:
-    """Yield every string found in a nested dict/list/scalar structure."""
+    """Yield every string found in a nested dict/list/scalar structure, including dict keys."""
     if isinstance(value, str):
         yield value
     elif isinstance(value, dict):
-        for v in value.values():
+        for k, v in value.items():
+            if isinstance(k, str):
+                yield k           # keys may contain IP literals (e.g. {"8.8.8.8": ...})
             yield from _iter_strings(v)
     elif isinstance(value, (list, tuple)):
         for v in value:
@@ -80,10 +90,13 @@ def _iter_strings(value) -> Iterator[str]:
 
 
 def find_disallowed_ips(example: dict) -> list[str]:
-    """Return all real/public IP literals found anywhere in an example."""
+    """Return all real/public IP literals found anywhere in an example (keys and values)."""
     violations: list[str] = []
     for s in _iter_strings(example):
         for candidate in _IPV4_RE.findall(s):
+            if not _is_allowed_ip(candidate):
+                violations.append(candidate)
+        for candidate in _IPV6_RE.findall(s):
             if not _is_allowed_ip(candidate):
                 violations.append(candidate)
     return violations
