@@ -6,6 +6,31 @@ independently committable and ends with a verification gate. Line numbers refer 
 commit `d58bf5a`. Run the full suite (`pytest tests/ -q`) plus
 `python validate_requirements.py --impl impl_config.json` after every phase.
 
+## Status (updated)
+
+- **Phases A, B, C — DONE** (commit applying Phase A–C; 205 tests).
+- **Phase D — DONE** (this pass; 213 tests). Notes:
+  - **D1** — tiny pipeline is now content-sensitive via a deterministic
+    content-hash tokenization placeholder; the **full** path raises
+    `NotImplementedError` (it needs per-domain input projections from the
+    shared-1024 embedding down to 768/512, which don't exist yet — that
+    remains the one genuinely large outstanding item).
+  - **D2** — the ONNX dynamic-axis concern did **not** reproduce: TorchScript
+    tracing already honors dynamic seq_len (decoder) and batch (fusion). Locked
+    in with variable-shape round-trip tests + a reusable `FusionExportWrapper`.
+  - **D3** — `EarlyExitResult` now carries `kc_logits` (per-block, trainable —
+    unblocks EXPERIMENT-2) and `fused_repr`; the ATT&CK head reads the fused
+    representation.
+  - **D4** — sliding-window bug fixed (±window→±window/2, ~4096 span) and the
+    layer-schedule docstring corrected to match the code (globals {3,11}, DCAT
+    {6,7}). Signature unification was intentionally skipped (a silently-ignored
+    mask param is worse than none).
+  - **D5** — `MAX_AGENTIC_TURNS` enforced; `path_a` vocab-size assertion; GCN
+    degree from binary adjacency; true complex RotatE in `losses.py` +
+    per-pair modulus init in `path_c.py`; dead `import time` / `is_global`
+    removed. The two `AFNScore` classes were left as-is (the `types.py` one is
+    part of the public §10 interface; renaming it would change the contract).
+
 ---
 
 ## Phase A — Hard-constraint compliance (small diffs, do first)

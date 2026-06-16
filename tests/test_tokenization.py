@@ -164,6 +164,25 @@ class TestInferenceGCN:
         out = model(x, adj)
         assert out.shape == (N, 64)
 
+    def test_degree_features_from_binary_structure(self):
+        """Degree bins must reflect true node degree, not collapse to 0/1.
+
+        With a normalized adjacency (rows ~1.0) the old .long() truncation gave
+        every node degree 0 or 1. Counting non-zero neighbours fixes this.
+        """
+        model = InferenceGCN(d_graph=8, d_model=16)
+        N = 6
+        # Node 0 connected to all others (degree 5); node 5 connected only to 0.
+        adj = torch.zeros(N, N)
+        adj[0, :] = 1.0
+        adj[:, 0] = 1.0
+        # Normalize so rows are ~1 (mimics D^-1/2 A D^-1/2 magnitude).
+        adj = adj / adj.sum(dim=-1, keepdim=True).clamp(min=1e-9)
+        deg = model._degree_features(adj)            # (N, 32)
+        # Hub (node 0, degree 5) must map to a different bin than a leaf (node 5).
+        assert not torch.allclose(deg[0], deg[5]), \
+            "Degree features collapsed — hub and leaf got the same embedding"
+
 
 # ── Unified tokenizer routing ─────────────────────────────────────────────────
 

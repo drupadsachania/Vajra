@@ -34,6 +34,13 @@ class EarlyExitResult:
     # F3 tap always populated (hard constraint: markers at F3 and F6 on every call)
     f3_logits: torch.Tensor | None = None  # (batch, 4)
     f3_probs:  torch.Tensor | None = None  # (batch, 4)
+    # Per-block kill-chain transition logits (for the EXPERIMENT-2 multi-task
+    # objective — these are the trainable signal; the argmax state update is not).
+    kc_logits: torch.Tensor | None = None  # (batch, n_blocks_run, 7)
+    # Fused representation at the exit block (mean over the 7 domain tokens),
+    # the correct input for the ATT&CK technique head (§6.3) rather than a raw
+    # pre-fusion domain CLS.
+    fused_repr: torch.Tensor | None = None  # (batch, d_model)
 
 
 class EpistemicFusionLayer(nn.Module):
@@ -104,13 +111,16 @@ class EpistemicFusionLayer(nn.Module):
             kc_state = initial_kc_state
 
         f3_logits = None
+        f3_probs = None
+        kc_logits_per_block: list[torch.Tensor] = []
 
         for i, (block, kc_head) in enumerate(zip(self.blocks, self.kc_heads)):
             x = block(x)   # (batch, 7, d_model)
 
             # Kill-chain update using mean CLS representation
             cls_mean = x.mean(dim=1)   # (batch, d_model)
-            _, kc_state = kc_head(cls_mean, kc_state)
+            kc_block_logits, kc_state = kc_head(cls_mean, kc_state)
+            kc_logits_per_block.append(kc_block_logits)
 
             if i == 2:   # F3 tap (0-indexed block 2 = F3)
                 f3_logits = self.f3_head(cls_mean)    # (batch, 4)
@@ -127,6 +137,8 @@ class EpistemicFusionLayer(nn.Module):
                         exit_block=3,
                         f3_logits=f3_logits,
                         f3_probs=f3_probs,
+                        kc_logits=torch.stack(kc_logits_per_block, dim=1),
+                        fused_repr=cls_mean,
                     )
 
         # F6 tap (all 6 blocks completed)
@@ -142,4 +154,6 @@ class EpistemicFusionLayer(nn.Module):
             exit_block=6,
             f3_logits=f3_logits,
             f3_probs=f3_probs,
+            kc_logits=torch.stack(kc_logits_per_block, dim=1),
+            fused_repr=cls_mean,
         )

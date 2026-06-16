@@ -18,6 +18,25 @@ import torch.nn as nn
 ONNX_OPSET = 17
 
 
+class FusionExportWrapper(nn.Module):
+    """Wraps an EpistemicFusionLayer so ONNX export sees a tensor-only forward.
+
+    The fusion layer returns an EarlyExitResult dataclass and contains a
+    data-dependent early-exit branch. For serving we export the full F6 path
+    and return only the decision logits — early exit is a runtime latency
+    optimization, not a graph-level requirement. The traced graph therefore
+    always runs all six blocks (the `.all()` branch is baked to its trace-time
+    value), which is the intended behaviour for the exported artifact.
+    """
+
+    def __init__(self, fusion: nn.Module):
+        super().__init__()
+        self.fusion = fusion
+
+    def forward(self, domain_cls_tokens: torch.Tensor) -> torch.Tensor:
+        return self.fusion(domain_cls_tokens).decision_logits
+
+
 def export_encoder_fusion(
     encoder_fusion_model: nn.Module,
     path: str | Path = "vajra_encoder_fusion.onnx",

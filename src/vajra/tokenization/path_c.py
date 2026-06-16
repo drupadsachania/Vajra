@@ -27,9 +27,14 @@ class TransERotatELayer(nn.Module):
     def _init_weights(self):
         nn.init.uniform_(self.entity_emb.weight,  -6 / math.sqrt(self.d_kg), 6 / math.sqrt(self.d_kg))
         nn.init.uniform_(self.relation_emb.weight, -6 / math.sqrt(self.d_kg), 6 / math.sqrt(self.d_kg))
-        # RotatE requires relation magnitudes ≈ 1 in complex space
+        # RotatE requires each complex element (re_j, im_j) to have unit modulus,
+        # not the whole vector to have unit L2 norm. Normalize per (re, im) pair.
         with torch.no_grad():
-            self.relation_emb.weight.data = F.normalize(self.relation_emb.weight.data, dim=-1)
+            w = self.relation_emb.weight.data
+            d = self.d_kg // 2
+            re, im = w[:, :d], w[:, d:]
+            mod = (re ** 2 + im ** 2).sqrt().clamp_min(1e-9)
+            self.relation_emb.weight.data = torch.cat([re / mod, im / mod], dim=-1)
 
     def transe_score(self, h: torch.Tensor, r: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         """||h + r - t||₂ (lower = more plausible)."""
@@ -123,8 +128,11 @@ class InferenceGCN(nn.Module):
         self.gcn2 = GCNLayer(d_graph, d_model)
 
     def _degree_features(self, adj: torch.Tensor) -> torch.Tensor:
-        degrees = adj.sum(dim=-1).long().clamp(max=self.DEGREE_BINS)  # (N,)
-        return self.degree_emb(degrees)                                 # (N, 32)
+        # Count non-zero neighbours from the *binary* structure. Using the
+        # normalized adjacency (rows summing to ~1) would collapse every degree
+        # to 0/1 after .long() truncation, making the Graphormer feature useless.
+        degrees = (adj > 0).sum(dim=-1).clamp(max=self.DEGREE_BINS)  # (N,)
+        return self.degree_emb(degrees)                              # (N, 32)
 
     def forward(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
         """

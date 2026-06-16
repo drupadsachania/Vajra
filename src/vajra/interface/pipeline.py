@@ -6,6 +6,7 @@ optional constrained decoder → VajraInferenceResponse.
 """
 from __future__ import annotations
 
+import hashlib
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
@@ -33,6 +34,23 @@ DOMAIN_ORDER = [
     "detection_network", "forensics_provenance", "cti_stix",
     "vulnerability_risk", "identity_access", "incident_response", "compliance",
 ]
+
+
+def _event_token_ids(events: list, vocab_size: int, device) -> "torch.Tensor":
+    """Deterministically map events to token IDs so inference is content-sensitive.
+
+    This is a content-hash placeholder for the real S-TOON / numerical / graph
+    tokenization paths: identical events always yield identical IDs (and thus
+    identical model output), while different event content yields different IDs.
+    Empty domains get a single constant 'absent' token.
+    """
+    if not events:
+        return torch.zeros(1, 1, dtype=torch.long, device=device)
+    ids = []
+    for evt in events:
+        key = f"{evt.event_type}|{evt.domain}|{repr(sorted(evt.data.items(), key=lambda kv: kv[0]))}"
+        ids.append(int(hashlib.md5(key.encode()).hexdigest(), 16) % vocab_size)
+    return torch.tensor([ids], dtype=torch.long, device=device)
 
 
 class VajraInferencePipeline(nn.Module):
@@ -143,19 +161,29 @@ class VajraInferencePipeline(nn.Module):
         device = next(self.parameters()).device
         cfg = self.cfg
 
-        # --- Build per-domain input tensors (synthetic: batch=1, seq=4) ---
-        # In production these come from the tokenization paths; here we use
-        # a minimal synthetic representation to support integration testing.
+        # --- Route events to domains, then build per-domain input embeddings ---
         domain_inputs: dict[str, torch.Tensor] = {}
         events_by_domain: dict[str, list] = {d: [] for d in DOMAIN_ORDER}
         for evt in request.events:
             dom = evt.domain if evt.domain in events_by_domain else "detection_network"
             events_by_domain[dom].append(evt)
 
+        if not self._tiny:
+            # The full pipeline needs the real tokenization paths (S-TOON /
+            # numerical / graph) wired through per-domain input projections that
+            # bring the shared-1024 embedding down to each encoder's d_model
+            # (768/512). Until that exists, fail loudly rather than return output
+            # derived from placeholder tensors.
+            raise NotImplementedError(
+                "Full pipeline.run() requires real tokenization wiring. Use "
+                "tiny=True for end-to-end testing, or drive the encoder/fusion/"
+                "decoder modules directly."
+            )
+
+        vocab = self.cfg.embedding.vocabulary_size
         for domain in DOMAIN_ORDER:
-            seq_len = max(1, len(events_by_domain[domain]))
-            d = self._domain_d_model[domain]
-            domain_inputs[domain] = torch.randn(1, seq_len, d, device=device)
+            ids = _event_token_ids(events_by_domain[domain], vocab, device)  # (1, seq)
+            domain_inputs[domain] = self.embedding(ids)                      # (1, seq, d)
 
         # --- Run 7 domain encoders (parallel via ThreadPoolExecutor) ---
         cls_tokens: dict[str, Optional[torch.Tensor]] = {d: None for d in DOMAIN_ORDER}
@@ -214,8 +242,10 @@ class VajraInferencePipeline(nn.Module):
             decision_class, max_dcat_divergence, self.cfg.dcat.theta_divergence
         )
 
-        # --- ATT&CK technique head ---
-        fused_cls = fusion_input[:, 0, :]  # use first domain CLS as proxy
+        # --- ATT&CK technique head (reads the post-fusion representation, §6.3) ---
+        fused_cls = fusion_result.fused_repr             # (1, d_model) post-fusion
+        if fused_cls is None:
+            fused_cls = fusion_input[:, 0, :]
         technique_logits = self.attack_head(fused_cls)   # (1, 716) — raw logits
         technique_probs = torch.sigmoid(technique_logits)[0]  # (716,)
         technique_ids = [

@@ -96,13 +96,25 @@ class MITREOntologyLoss(nn.Module):
     """TransE + RotatE margin-based ontology embedding loss.
 
     TransE: ||h + r - t||₂ + margin
-    RotatE: ||h ∘ r - t||₂ + margin   (element-wise product in complex space)
+    RotatE: ||h ∘ r - t||₂ + margin   (complex Hadamard rotation; d_emb split
+            into [real | imag] halves, so d_emb must be even)
     Combined: sum of both with margin γ=2.
     """
 
     def __init__(self, margin: float = 2.0):
         super().__init__()
         self.margin = margin
+
+    @staticmethod
+    def _rotate_dist(h: torch.Tensor, r: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+        """||h ∘ r − t||₂ with complex rotation (h, r, t are [re | im] halves)."""
+        d = h.shape[-1] // 2
+        h_re, h_im = h[..., :d], h[..., d:]
+        r_re, r_im = r[..., :d], r[..., d:]
+        t_re, t_im = t[..., :d], t[..., d:]
+        prod_re = h_re * r_re - h_im * r_im
+        prod_im = h_re * r_im + h_im * r_re
+        return torch.cat([prod_re - t_re, prod_im - t_im], dim=-1).norm(dim=-1)
 
     def forward(
         self,
@@ -113,7 +125,7 @@ class MITREOntologyLoss(nn.Module):
         t_neg: torch.Tensor,
     ) -> torch.Tensor:
         """
-        h, r, t     : (batch, d_emb) — positive triple
+        h, r, t     : (batch, d_emb) — positive triple (d_emb even for RotatE)
         h_neg, t_neg: (batch, d_emb) — negative samples
 
         Returns scalar loss.
@@ -123,9 +135,9 @@ class MITREOntologyLoss(nn.Module):
         neg_transe = (h_neg + r - t_neg).norm(dim=-1)
         loss_transe = F.relu(self.margin + pos_transe - neg_transe).mean()
 
-        # RotatE (real-valued approximation via element-wise product)
-        pos_rotate = (h * r - t).norm(dim=-1)
-        neg_rotate = (h_neg * r - t_neg).norm(dim=-1)
+        # RotatE (true complex rotation in [re | im] space)
+        pos_rotate = self._rotate_dist(h, r, t)
+        neg_rotate = self._rotate_dist(h_neg, r, t_neg)
         loss_rotate = F.relu(self.margin + pos_rotate - neg_rotate).mean()
 
         return loss_transe + loss_rotate

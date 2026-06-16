@@ -57,6 +57,13 @@ class SentinelTokenizer:
                 self._sentinel_ids[tok] = sid
                 self._id_to_token[sid] = tok
 
+        # The embedding table is sized to cfg.embedding.vocabulary_size; a larger
+        # tokenizer vocab would index out of range at embedding time.
+        assert self.vocab_size <= cfg.embedding.vocabulary_size, (
+            f"Tokenizer vocab_size {self.vocab_size} exceeds configured "
+            f"embedding vocabulary_size {cfg.embedding.vocabulary_size}"
+        )
+
     @property
     def vocab_size(self) -> int:
         if self._tok is not None:

@@ -9,7 +9,6 @@ Max latency: 15ms on CPU for a (1, 512, 1024) hidden state tensor.
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 
 import torch

@@ -206,3 +206,16 @@ class TestEpistemicFusionLayer:
         assert result.early_exit
         assert result.f3_logits is not None
         assert result.f3_probs is not None
+
+    def test_kc_logits_and_fused_repr_exposed(self):
+        """EXPERIMENT-2 needs trainable kill-chain logits; ATT&CK head needs fused repr."""
+        fusion = self._make_fusion()
+        x = torch.randn(2, 7, 64)
+        result = fusion(x)
+        # Per-block kill-chain transition logits: (batch, n_blocks_run, 7)
+        assert result.kc_logits is not None
+        assert result.kc_logits.shape == (2, fusion.N_BLOCKS, 7)
+        assert result.kc_logits.requires_grad  # trainable signal
+        # Fused representation for the technique head: (batch, d_model)
+        assert result.fused_repr is not None
+        assert result.fused_repr.shape == (2, 64)

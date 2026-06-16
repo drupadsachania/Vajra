@@ -50,10 +50,13 @@ class LocalWindowAttention(nn.Module):
         scale = math.sqrt(self.head_dim)
         w = torch.matmul(q, k.transpose(-2, -1)) / scale   # (B, H, S, S)
 
-        # Local window mask: each position attends only to ±window tokens
+        # Local sliding window: a position attends to ±(window/2) neighbours, so
+        # the total attended span is ~`window` tokens (§4.1 specifies a 4096-token
+        # window). Using ±window would give a ~2×window span (the previous bug).
+        half = self.window // 2
         if S > self.window:
             pos = torch.arange(S, device=x.device)
-            mask = (pos.unsqueeze(0) - pos.unsqueeze(1)).abs() > self.window
+            mask = (pos.unsqueeze(0) - pos.unsqueeze(1)).abs() > half
             w = w.masked_fill(mask.unsqueeze(0).unsqueeze(0), float("-inf"))
 
         w = F.softmax(w, dim=-1)
@@ -119,9 +122,6 @@ class _GlobalBlock(nn.Module):
         self.ffn  = SwiGLUFFN(d_model, ffn_width)
         self.drop = nn.Dropout(dropout)
 
-    def is_global(self) -> bool:
-        return True
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x + self.drop(self.attn(self.ln1(x)))
         x = x + self.drop(self.ffn(self.ln2(x)))
@@ -131,19 +131,18 @@ class _GlobalBlock(nn.Module):
 class InterleavedAttentionEncoder(nn.Module):
     """12-layer interleaved RoPE/NoPE encoder for Detection and Forensics (§4.1).
 
-    Layer schedule (0-indexed):
-      - Layers 0,1,2   → Local + RoPE
-      - Layer 3        → Global + NoPE  (every 4th, stride=4)
-      - Layers 4,5     → Local + RoPE
-      - Layer 6        → Global + NoPE
-      - Layers 7,8     → DCAT (replaces local, per spec §4.3)
-      - Layer 9        → Local + RoPE
-      - Layer 10       → Global + NoPE
-      - Layer 11       → Local + RoPE
+    The spec says DCAT replaces layers 7 and 8 (1-indexed = 0-indexed 6 and 7),
+    and global NoPE layers fall on the stride-4 slots (0-indexed 3, 7, 11). DCAT
+    is checked first, so it claims slot 7; the resulting actual schedule is:
 
-    The spec says DCAT replaces layers 7 and 8 (1-indexed = 0-indexed 6 and 7).
-    Since global stride is 4 (0-indexed layers 3,7,11 would be global), we
-    implement the 12-layer schedule with DCAT at positions 6 and 7 (0-indexed).
+      - Layers 0,1,2   → Local + RoPE
+      - Layer 3        → Global + NoPE   (stride-4 slot)
+      - Layers 4,5     → Local + RoPE
+      - Layers 6,7     → DCAT             (replaces local + the slot-7 global)
+      - Layers 8,9,10  → Local + RoPE
+      - Layer 11       → Global + NoPE   (stride-4 slot)
+
+    Net: two global NoPE layers (3, 11), two DCAT layers (6, 7), eight local.
     """
 
     GLOBAL_STRIDE = 4   # every 4th layer (0-indexed: 3, 7, 11 for 12 layers)

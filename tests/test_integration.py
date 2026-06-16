@@ -97,6 +97,34 @@ class TestEndToEnd:
 
 
 # ---------------------------------------------------------------------------
+# Content sensitivity (D1: tokenization wiring)
+# ---------------------------------------------------------------------------
+class TestContentSensitivity:
+    def _req(self, request_id, event_id):
+        ev = SecurityEvent(event_type="evtx", domain="detection_network",
+                           data={"EventID": event_id}, timestamp=1700000000.0)
+        return VajraInferenceRequest(request_id=request_id, events=[ev])
+
+    def test_same_content_same_output(self, pipeline):
+        a = pipeline.run(self._req("a", 4624))
+        b = pipeline.run(self._req("b", 4624))
+        assert a.decision_probabilities == b.decision_probabilities
+
+    def test_different_content_different_output(self, pipeline):
+        a = pipeline.run(self._req("a", 4624))
+        b = pipeline.run(self._req("b", 1102))
+        assert a.decision_probabilities != b.decision_probabilities, \
+            "Different event content produced identical output — run() ignores content"
+
+    def test_full_pipeline_run_guarded(self, cfg):
+        """Full (non-tiny) run() must fail loudly, not return placeholder output."""
+        pipe = VajraInferencePipeline(cfg=cfg, tiny=False)
+        pipe.eval()
+        with pytest.raises(NotImplementedError):
+            pipe.run(_make_request())
+
+
+# ---------------------------------------------------------------------------
 # Decoder invocation guard
 # ---------------------------------------------------------------------------
 class TestDecoderGuard:
@@ -232,6 +260,15 @@ class TestFunctionCalling:
         assert calls[0].tool_name == "lookup_cve"
         assert calls[1].tool_name == "lookup_ioc"
 
+    def test_max_agentic_turns_enforced(self):
+        from vajra.interface.function_calling import MAX_AGENTIC_TURNS
+        text = '{"type": "tool_call", "tool_name": "lookup_cve", "parameters": {}}'
+        # Within budget → parsed
+        assert len(parse_tool_calls(text, turn=MAX_AGENTIC_TURNS - 1)) == 1
+        # At/over budget → no further calls emitted
+        assert parse_tool_calls(text, turn=MAX_AGENTIC_TURNS) == []
+        assert parse_tool_calls(text, turn=MAX_AGENTIC_TURNS + 5) == []
+
 
 # ---------------------------------------------------------------------------
 # ONNX export
@@ -285,3 +322,44 @@ class TestONNXExport:
             x_np = np.random.randn(1, 7, 1024).astype(np.float32)
             out = sess.run(None, {"domain_cls_tokens": x_np})
             assert out[0].shape == (1, 4)
+
+    def test_decoder_onnx_honors_dynamic_seq_len(self):
+        """Exported decoder must run at a seq_len different from the trace length."""
+        pytest.importorskip("onnxruntime")
+        import onnxruntime as ort
+        import numpy as np
+
+        decoder = ConstrainedDecoder(
+            vocab_size=1000, d_model=64, n_heads=4, n_layers=2,
+            ffn_width=128, dropout=0.0,
+        )
+        decoder.eval()
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "dec.onnx")
+            export_decoder(decoder, path=path, vocab_size=1000,
+                           afn_top_k=16, d_model=64, tgt_len=4)  # trace at 4
+            sess = ort.InferenceSession(path)
+            for L in (1, 8, 16):  # all ≠ trace length
+                ids = np.random.randint(0, 100, (1, L)).astype(np.int64)
+                enc = np.random.randn(1, 16, 64).astype(np.float32)
+                out = sess.run(None, {"input_ids": ids, "afn_encoder_states": enc})
+                assert out[0].shape == (1, L, 1000)
+
+    def test_fusion_onnx_honors_dynamic_batch(self, cfg):
+        """Exported fusion (via FusionExportWrapper) must run at varying batch sizes."""
+        pytest.importorskip("onnxruntime")
+        import onnxruntime as ort
+        import numpy as np
+        from vajra.interface.onnx_export import FusionExportWrapper
+
+        fusion = EpistemicFusionLayer(cfg)
+        fusion.eval()
+        wrapper = FusionExportWrapper(fusion)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "fus.onnx")
+            export_encoder_fusion(wrapper, path=path, d_model=1024, n_domains=7)  # trace batch=1
+            sess = ort.InferenceSession(path)
+            for B in (2, 4):  # ≠ trace batch
+                x_np = np.random.randn(B, 7, 1024).astype(np.float32)
+                out = sess.run(None, {"domain_cls_tokens": x_np})
+                assert out[0].shape == (B, 4)
