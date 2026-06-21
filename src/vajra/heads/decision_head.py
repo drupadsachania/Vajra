@@ -58,17 +58,19 @@ class DecisionStateClassifier(nn.Module):
           probs          : (batch, 4)
           decision_class : (batch,) int — class indices after optional DCAT override
         """
-        logits = self.head(fusion_cls)                   # (batch, 4)
-        probs  = F.softmax(logits, dim=-1)               # (batch, 4)
-        decision_class = probs.argmax(dim=-1)            # (batch,)
+        logits = self.head(fusion_cls)  # (batch, 4)
+        probs = F.softmax(logits, dim=-1)  # (batch, 4)
+        decision_class = probs.argmax(dim=-1)  # (batch,)
 
         if dcat_divergence is not None:
             # DCAT override: high divergence + class ∉ {0,1} → force class=1
             override_mask = (
-                (dcat_divergence > theta_divergence) &
-                (decision_class != 0) &
-                (decision_class != 1)
+                (dcat_divergence > theta_divergence)
+                & (decision_class != 0)
+                & (decision_class != 1)
             )
-            decision_class = torch.where(override_mask, torch.ones_like(decision_class), decision_class)
+            decision_class = torch.where(
+                override_mask, torch.ones_like(decision_class), decision_class
+            )
 
         return logits, probs, decision_class

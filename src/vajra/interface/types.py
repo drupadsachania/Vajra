@@ -1,4 +1,5 @@
 """VajraInferenceRequest / VajraInferenceResponse dataclasses (§10.1, §10.2)."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -67,13 +68,13 @@ class VajraInferenceRequest:
 @dataclass
 class VajraInferenceResponse:
     request_id: str
-    decision_class: int                      # 0–3 integer index
-    decision_probabilities: list[float]      # softmax over 4 classes
+    decision_class: int  # 0–3 integer index
+    decision_probabilities: list[float]  # softmax over 4 classes
     confidence: float
-    technique_ids: list[str]                 # ATT&CK technique IDs with prob > τ
+    technique_ids: list[str]  # ATT&CK technique IDs with prob > τ
     evidence_dag: EvidenceDAG
     afn_scores: list[AFNScore]
-    justification_trace: str                 # empty when decoder not invoked
+    justification_trace: str  # empty when decoder not invoked
     inference_latency_ms: float
     early_exit: bool
     dcat_override: bool

@@ -9,3 +9,4 @@ build/
 
 # Raw dataset staging — never commit raw pulls; only normalized splits are published
 data/raw/
+src/vajra.egg-info/

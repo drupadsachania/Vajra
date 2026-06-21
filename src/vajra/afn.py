@@ -18,7 +18,7 @@ import torch.nn as nn
 @dataclass
 class AFNScore:
     domain: str
-    token_indices: torch.Tensor   # (top_k,) long — absolute position indices
+    token_indices: torch.Tensor  # (top_k,) long — absolute position indices
     importance_scores: torch.Tensor  # (top_k,) float — normalized L2 norms
 
 
@@ -35,18 +35,16 @@ class ActivationFlowNetwork(nn.Module):
         super().__init__()
         self.top_k = top_k
 
-    def score_domain(
-        self, hidden: torch.Tensor, domain: str
-    ) -> AFNScore:
+    def score_domain(self, hidden: torch.Tensor, domain: str) -> AFNScore:
         """Score all tokens in a single domain's AFN-layer hidden states.
 
         hidden : (batch, seq, d_model) — hidden states at AFN target layer
         Returns AFNScore for batch index 0 (single-example scoring).
         """
         # L2 norm per token: (batch, seq)
-        norms = hidden.norm(dim=-1)   # (batch, seq)
+        norms = hidden.norm(dim=-1)  # (batch, seq)
         # Use first example in batch for index selection (per-request operation)
-        norms_0 = norms[0]            # (seq,)
+        norms_0 = norms[0]  # (seq,)
         # Normalize to sum ≈ 1
         norm_sum = norms_0.sum().clamp(min=1e-8)
         importance = norms_0 / norm_sum
@@ -91,7 +89,7 @@ class ActivationFlowNetwork(nn.Module):
         for domain, score in afn_scores.items():
             if domain not in encoder_outputs:
                 continue
-            hidden = encoder_outputs[domain]          # (batch, seq, d_model)
-            idx = score.token_indices                 # (top_k,)
-            result[domain] = hidden[:, idx, :]        # (batch, top_k, d_model)
+            hidden = encoder_outputs[domain]  # (batch, seq, d_model)
+            idx = score.token_indices  # (top_k,)
+            result[domain] = hidden[:, idx, :]  # (batch, top_k, d_model)
         return result

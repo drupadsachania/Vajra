@@ -16,13 +16,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
 try:
-    from torch.quantization import (
-        FakeQuantize,
-        MovingAverageMinMaxObserver,
-        MovingAveragePerChannelMinMaxObserver,
-    )
+    from torch.quantization import (FakeQuantize, MovingAverageMinMaxObserver,
+                                    MovingAveragePerChannelMinMaxObserver)
+
     _QAT_AVAILABLE = True
 except ImportError:
     _QAT_AVAILABLE = False
@@ -91,7 +88,9 @@ def _wrap_decoder_linear(module: nn.Module) -> None:
             _wrap_decoder_linear(child)
 
 
-def _wrap_kv_projections(module: nn.Module, names: tuple[str, ...] = ("k", "v")) -> None:
+def _wrap_kv_projections(
+    module: nn.Module, names: tuple[str, ...] = ("k", "v")
+) -> None:
     """Attach 8-bit KVCacheQuantizer to k/v projection linears in attention blocks."""
     for name, child in list(module.named_children()):
         if isinstance(child, nn.Linear) and name in names:

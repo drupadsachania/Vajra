@@ -11,7 +11,6 @@ import torch.nn as nn
 
 from .blocks import PreLNTransformerBlock
 
-
 _AFN_LAYER_MAP: dict[int, int] = {12: 8, 8: 6, 6: 4, 4: 3}
 
 
@@ -39,10 +38,12 @@ class DomainEncoder(nn.Module):
         self.context_window = context_window
         self.afn_layer = _AFN_LAYER_MAP.get(layers, layers - 2)
 
-        self.blocks = nn.ModuleList([
-            PreLNTransformerBlock(d_model, n_heads, ffn_width, dropout)
-            for _ in range(layers)
-        ])
+        self.blocks = nn.ModuleList(
+            [
+                PreLNTransformerBlock(d_model, n_heads, ffn_width, dropout)
+                for _ in range(layers)
+            ]
+        )
         self.final_ln = nn.LayerNorm(d_model)
 
         # Populated during forward; used by AFN
@@ -61,7 +62,7 @@ class DomainEncoder(nn.Module):
         """
         for i, block in enumerate(self.blocks):
             x = block(x, attn_mask)
-            if i + 1 == self.afn_layer:     # 1-indexed layer == afn_layer
+            if i + 1 == self.afn_layer:  # 1-indexed layer == afn_layer
                 self.afn_hidden = x.detach()
 
         x = self.final_ln(x)

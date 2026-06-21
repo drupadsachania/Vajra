@@ -92,7 +92,13 @@ class EmbeddingConfig:
 @dataclass
 class KillChainConfig:
     states: tuple[str, ...] = (
-        "RECON", "WEAPONIZE", "DELIVER", "EXPLOIT", "INSTALL", "C2", "EXFIL"
+        "RECON",
+        "WEAPONIZE",
+        "DELIVER",
+        "EXPLOIT",
+        "INSTALL",
+        "C2",
+        "EXFIL",
     )
     skip_stages_allowed: bool = False
 
@@ -113,31 +119,56 @@ class VajraConfig:
     mtp_drafter: MTPDrafterConfig = field(default_factory=MTPDrafterConfig)
     kill_chain: KillChainConfig = field(default_factory=KillChainConfig)
 
-    domain_encoders: dict[str, EncoderConfig] = field(default_factory=lambda: {
-        "detection_network": EncoderConfig(
-            layers=12, d_model=1024, attention_heads=16, ffn_width=4096,
-            dcat_layers=[7, 8], context_window_tokens=32768,
-        ),
-        "forensics_provenance": EncoderConfig(
-            layers=12, d_model=1024, attention_heads=16, ffn_width=4096,
-            dcat_layers=[7, 8], context_window_tokens=32768,
-        ),
-        "cti_stix": EncoderConfig(
-            layers=8, d_model=768, attention_heads=12, ffn_width=3072,
-        ),
-        "vulnerability_risk": EncoderConfig(
-            layers=8, d_model=768, attention_heads=12, ffn_width=3072,
-        ),
-        "identity_access": EncoderConfig(
-            layers=6, d_model=768, attention_heads=12, ffn_width=3072,
-        ),
-        "incident_response": EncoderConfig(
-            layers=6, d_model=768, attention_heads=12, ffn_width=3072,
-        ),
-        "compliance": EncoderConfig(
-            layers=4, d_model=512, attention_heads=8, ffn_width=2048,
-        ),
-    })
+    domain_encoders: dict[str, EncoderConfig] = field(
+        default_factory=lambda: {
+            "detection_network": EncoderConfig(
+                layers=12,
+                d_model=1024,
+                attention_heads=16,
+                ffn_width=4096,
+                dcat_layers=[7, 8],
+                context_window_tokens=32768,
+            ),
+            "forensics_provenance": EncoderConfig(
+                layers=12,
+                d_model=1024,
+                attention_heads=16,
+                ffn_width=4096,
+                dcat_layers=[7, 8],
+                context_window_tokens=32768,
+            ),
+            "cti_stix": EncoderConfig(
+                layers=8,
+                d_model=768,
+                attention_heads=12,
+                ffn_width=3072,
+            ),
+            "vulnerability_risk": EncoderConfig(
+                layers=8,
+                d_model=768,
+                attention_heads=12,
+                ffn_width=3072,
+            ),
+            "identity_access": EncoderConfig(
+                layers=6,
+                d_model=768,
+                attention_heads=12,
+                ffn_width=3072,
+            ),
+            "incident_response": EncoderConfig(
+                layers=6,
+                d_model=768,
+                attention_heads=12,
+                ffn_width=3072,
+            ),
+            "compliance": EncoderConfig(
+                layers=4,
+                d_model=512,
+                attention_heads=8,
+                ffn_width=2048,
+            ),
+        }
+    )
 
     # Hard constraints (non-mutable by design)
     exploit_synthesis_in_weights: bool = False
@@ -152,13 +183,26 @@ class VajraConfig:
 
     # Sentinel tokens (Path A tokenization)
     sentinel_tokens: tuple[str, ...] = (
-        "<|S_START|>", "<|S_END|>", "<|S_KEY|>", "<|S_VAL|>",
-        "<|S_ARR|>", "<|S_NULL|>",
-        "<|S_DOMAIN:detection|>", "<|S_DOMAIN:forensics|>", "<|S_DOMAIN:cti|>",
-        "<|S_DOMAIN:vuln|>", "<|S_DOMAIN:identity|>", "<|S_DOMAIN:ir|>",
+        "<|S_START|>",
+        "<|S_END|>",
+        "<|S_KEY|>",
+        "<|S_VAL|>",
+        "<|S_ARR|>",
+        "<|S_NULL|>",
+        "<|S_DOMAIN:detection|>",
+        "<|S_DOMAIN:forensics|>",
+        "<|S_DOMAIN:cti|>",
+        "<|S_DOMAIN:vuln|>",
+        "<|S_DOMAIN:identity|>",
+        "<|S_DOMAIN:ir|>",
         "<|S_DOMAIN:compliance|>",
-        "<|S_EVTX|>", "<|S_STIX|>", "<|S_SIGMA|>", "<|S_CLOUD|>", "<|S_LDAP|>",
-        "<|S_BASELINE|>", "<|S_OBSERVED|>",
+        "<|S_EVTX|>",
+        "<|S_STIX|>",
+        "<|S_SIGMA|>",
+        "<|S_CLOUD|>",
+        "<|S_LDAP|>",
+        "<|S_BASELINE|>",
+        "<|S_OBSERVED|>",
     )
 
     @property
@@ -168,6 +212,10 @@ class VajraConfig:
     def afn_layer_for_encoder(self, domain: str) -> int:
         """Return the AFN target layer index for a given domain encoder."""
         enc = self.domain_encoders[domain]
-        mapping = {12: self.afn.layer_target_12l, 8: self.afn.layer_target_8l,
-                   6: self.afn.layer_target_6l,  4: self.afn.layer_target_4l}
+        mapping = {
+            12: self.afn.layer_target_12l,
+            8: self.afn.layer_target_8l,
+            6: self.afn.layer_target_6l,
+            4: self.afn.layer_target_4l,
+        }
         return mapping[enc.layers]

@@ -10,18 +10,21 @@ Invoked only when decision_class ∈ {0,1} AND request_justification_trace=True.
 from __future__ import annotations
 
 import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from vajra.encoders.blocks import RotaryEmbedding, apply_rotary_pos_emb, SwiGLUFFN
+from vajra.encoders.blocks import (RotaryEmbedding, SwiGLUFFN,
+                                   apply_rotary_pos_emb)
+
 from .vocab_mask import VocabularyMask
 
 
 class _CausalSelfAttention(nn.Module):
     def __init__(self, d_model: int, n_heads: int, dropout: float = 0.1):
         super().__init__()
-        self.n_heads  = n_heads
+        self.n_heads = n_heads
         self.head_dim = d_model // n_heads
         self.q = nn.Linear(d_model, d_model, bias=False)
         self.k = nn.Linear(d_model, d_model, bias=False)
@@ -55,7 +58,7 @@ class _CrossAttention(nn.Module):
 
     def __init__(self, d_model: int, n_heads: int, dropout: float = 0.1):
         super().__init__()
-        self.n_heads  = n_heads
+        self.n_heads = n_heads
         self.head_dim = d_model // n_heads
         self.q = nn.Linear(d_model, d_model, bias=False)
         self.k = nn.Linear(d_model, d_model, bias=False)
@@ -72,8 +75,16 @@ class _CrossAttention(nn.Module):
         S = encoder_states.shape[1]
 
         q = self.q(x).view(B, T, self.n_heads, self.head_dim).transpose(1, 2)
-        k = self.k(encoder_states).view(B, S, self.n_heads, self.head_dim).transpose(1, 2)
-        v = self.v(encoder_states).view(B, S, self.n_heads, self.head_dim).transpose(1, 2)
+        k = (
+            self.k(encoder_states)
+            .view(B, S, self.n_heads, self.head_dim)
+            .transpose(1, 2)
+        )
+        v = (
+            self.v(encoder_states)
+            .view(B, S, self.n_heads, self.head_dim)
+            .transpose(1, 2)
+        )
 
         scale = math.sqrt(self.head_dim)
         w = F.softmax(torch.matmul(q, k.transpose(-2, -1)) / scale, dim=-1)
@@ -83,14 +94,16 @@ class _CrossAttention(nn.Module):
 
 
 class _DecoderBlock(nn.Module):
-    def __init__(self, d_model: int, n_heads: int, ffn_width: int, dropout: float = 0.1):
+    def __init__(
+        self, d_model: int, n_heads: int, ffn_width: int, dropout: float = 0.1
+    ):
         super().__init__()
         self.ln1 = nn.LayerNorm(d_model)
         self.ln2 = nn.LayerNorm(d_model)
         self.ln3 = nn.LayerNorm(d_model)
-        self.self_attn  = _CausalSelfAttention(d_model, n_heads, dropout)
+        self.self_attn = _CausalSelfAttention(d_model, n_heads, dropout)
         self.cross_attn = _CrossAttention(d_model, n_heads, dropout)
-        self.ffn  = SwiGLUFFN(d_model, ffn_width)
+        self.ffn = SwiGLUFFN(d_model, ffn_width)
         self.drop = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor, encoder_states: torch.Tensor) -> torch.Tensor:
@@ -122,19 +135,21 @@ class ConstrainedDecoder(nn.Module):
         extra_blocked_ids=None,
     ):
         super().__init__()
-        self.d_model   = d_model
-        self.n_layers  = n_layers
+        self.d_model = d_model
+        self.n_layers = n_layers
         self.vocab_size = vocab_size
 
         self.token_embed = nn.Embedding(vocab_size, d_model)
-        self.pos_embed   = nn.Embedding(self.MAX_POSITIONS, d_model)
+        self.pos_embed = nn.Embedding(self.MAX_POSITIONS, d_model)
 
-        self.blocks = nn.ModuleList([
-            _DecoderBlock(d_model, n_heads, ffn_width, dropout)
-            for _ in range(n_layers)
-        ])
+        self.blocks = nn.ModuleList(
+            [
+                _DecoderBlock(d_model, n_heads, ffn_width, dropout)
+                for _ in range(n_layers)
+            ]
+        )
         self.final_ln = nn.LayerNorm(d_model)
-        self.lm_head  = nn.Linear(d_model, vocab_size, bias=False)
+        self.lm_head = nn.Linear(d_model, vocab_size, bias=False)
 
         self.vocab_mask = VocabularyMask(
             vocab_size, tokenizer=tokenizer, extra_blocked_ids=extra_blocked_ids
@@ -153,7 +168,9 @@ class ConstrainedDecoder(nn.Module):
         """
         B, T = input_ids.shape
         # Clamp position IDs to MAX_POSITIONS - 1 (hard constraint §6.5)
-        pos_ids = torch.arange(T, device=input_ids.device).clamp(max=self.MAX_POSITIONS - 1)
+        pos_ids = torch.arange(T, device=input_ids.device).clamp(
+            max=self.MAX_POSITIONS - 1
+        )
 
         x = self.token_embed(input_ids) + self.pos_embed(pos_ids).unsqueeze(0)
 
@@ -161,7 +178,7 @@ class ConstrainedDecoder(nn.Module):
             x = block(x, afn_encoder_states)
 
         x = self.final_ln(x)
-        logits = self.lm_head(x)          # (batch, tgt_len, vocab_size)
+        logits = self.lm_head(x)  # (batch, tgt_len, vocab_size)
         logits = self.vocab_mask.apply(logits)
         return logits
 
@@ -174,8 +191,9 @@ class ConstrainedDecoder(nn.Module):
     ) -> torch.Tensor:
         """Simple greedy decode. Returns generated token IDs (batch=1 only)."""
         B = afn_encoder_states.shape[0]
-        input_ids = torch.full((B, 1), bos_token_id, dtype=torch.long,
-                               device=afn_encoder_states.device)
+        input_ids = torch.full(
+            (B, 1), bos_token_id, dtype=torch.long, device=afn_encoder_states.device
+        )
         for _ in range(min(max_new_tokens, self.MAX_POSITIONS - 1)):
             logits = self.forward(input_ids, afn_encoder_states)
             next_token = logits[:, -1, :].argmax(dim=-1, keepdim=True)

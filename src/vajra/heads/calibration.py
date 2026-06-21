@@ -7,6 +7,7 @@ ConformalPredictor: threshold calibration at 90% and 95% coverage on OOD set.
 from __future__ import annotations
 
 import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -20,9 +21,9 @@ class TemperatureScaler(nn.Module):
 
     def __init__(self, n_domains: int = 7, n_classes: int = 4):
         super().__init__()
-        self.temperatures = nn.ParameterDict({
-            f"domain_{i}": nn.Parameter(torch.ones(1)) for i in range(n_domains)
-        })
+        self.temperatures = nn.ParameterDict(
+            {f"domain_{i}": nn.Parameter(torch.ones(1)) for i in range(n_domains)}
+        )
         self.n_classes = n_classes
 
     def scale(self, logits: torch.Tensor, domain_idx: int) -> torch.Tensor:
@@ -53,7 +54,9 @@ class ConformalPredictor:
         true_labels    : (N,) long tensor of true class indices
         """
         N = softmax_scores.shape[0]
-        true_probs = softmax_scores[torch.arange(N), true_labels]  # (N,) conformity scores
+        true_probs = softmax_scores[
+            torch.arange(N), true_labels
+        ]  # (N,) conformity scores
         sorted_scores, _ = true_probs.sort()
 
         for coverage in self.coverage_targets:

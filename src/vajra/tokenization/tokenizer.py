@@ -8,9 +8,10 @@ from typing import Any
 import torch
 
 from vajra.config import VajraConfig
+
 from .path_a import SentinelTokenizer
-from .path_b import CvssEncoder, NetFlowEncoder, IpEncoder, NetFlowRecord
-from .path_c import MitreKGEmbedding, InferenceGCN
+from .path_b import CvssEncoder, IpEncoder, NetFlowEncoder, NetFlowRecord
+from .path_c import InferenceGCN, MitreKGEmbedding
 
 
 class TokenizationPath(str, Enum):

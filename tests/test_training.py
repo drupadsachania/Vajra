@@ -1,12 +1,14 @@
 """Tests for Chunk 8: QAT schedule + training losses + data loader."""
+
 import pytest
 import torch
 import torch.nn as nn
-from vajra.training.losses import FMLMLoss, KillChainLoss, BaNELLoss, DPOLoss, MITREOntologyLoss
-from vajra.training.qat import wNa8o8Schedule, KVCacheQuantizer, QATLinear
-from vajra.training.data import (
-    TrainingExampleLoader, DOMAIN_TAG_MAP, RealIPInTrainingError, find_disallowed_ips,
-)
+
+from vajra.training.data import (DOMAIN_TAG_MAP, RealIPInTrainingError,
+                                 TrainingExampleLoader, find_disallowed_ips)
+from vajra.training.losses import (BaNELLoss, DPOLoss, FMLMLoss, KillChainLoss,
+                                   MITREOntologyLoss)
+from vajra.training.qat import KVCacheQuantizer, QATLinear, wNa8o8Schedule
 
 
 # ---------------------------------------------------------------------------
@@ -51,7 +53,9 @@ class TestFMLMLoss:
 
         loss_masked = loss_fn(logits, labels, sentinel_mask=mask)
         # Compare against loss with all positions active
-        loss_full = loss_fn(logits, labels, sentinel_mask=torch.zeros(B, S, dtype=torch.bool))
+        loss_full = loss_fn(
+            logits, labels, sentinel_mask=torch.zeros(B, S, dtype=torch.bool)
+        )
         assert abs(loss_masked.item() - loss_full.item()) > 0
 
 
@@ -200,14 +204,15 @@ class TestQATSchedule:
         x = torch.randn(4, 32)
         # Enable the observer + fake-quant (QAT train mode)
         qat.train()
-        qat_out = qat(x)                                  # fake-quant applied to weight
-        fp_out = nn.functional.linear(x, linear.weight)   # full-precision reference
+        qat_out = qat(x)  # fake-quant applied to weight
+        fp_out = nn.functional.linear(x, linear.weight)  # full-precision reference
         # 2-bit quantization is lossy → outputs must differ measurably
         assert not torch.allclose(qat_out, fp_out, atol=1e-4)
         assert torch.isfinite(qat_out).all()
 
     def test_kv_projections_get_quantizer(self):
         """After apply_qat_to_module(mode='encoder'), k/v linears become KVCacheQuantizer."""
+
         class FakeAttention(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -236,12 +241,22 @@ class TestTrainingDataLoader:
     def _make_example(self, include_null=False):
         example = {
             "events": [
-                {"event_type": "evtx", "domain": "detection_network",
-                 "source_type_id": 0, "timestamp": 1700000000.0,
-                 "is_null_signal": False, "data": {"EventID": 4624}},
-                {"event_type": "netflow", "domain": "detection_network",
-                 "source_type_id": 2, "timestamp": 1700000001.0,
-                 "is_null_signal": include_null, "data": {}},
+                {
+                    "event_type": "evtx",
+                    "domain": "detection_network",
+                    "source_type_id": 0,
+                    "timestamp": 1700000000.0,
+                    "is_null_signal": False,
+                    "data": {"EventID": 4624},
+                },
+                {
+                    "event_type": "netflow",
+                    "domain": "detection_network",
+                    "source_type_id": 2,
+                    "timestamp": 1700000001.0,
+                    "is_null_signal": include_null,
+                    "data": {},
+                },
             ],
             "labels": {"decision_class": 0, "technique_ids": ["T1078"]},
             "null_signals": ["netflow"] if include_null else [],
@@ -293,8 +308,11 @@ class TestIPEnforcement:
     def _example_with_ip(self, ip):
         return {
             "events": [
-                {"event_type": "netflow", "domain": "detection_network",
-                 "data": {"src_ip": "10.0.0.5", "dst_ip": ip}},
+                {
+                    "event_type": "netflow",
+                    "domain": "detection_network",
+                    "data": {"src_ip": "10.0.0.5", "dst_ip": ip},
+                },
             ],
             "labels": {},
         }
@@ -326,7 +344,7 @@ class TestIPEnforcement:
     def test_find_disallowed_ips_reports_only_public(self):
         ex = self._example_with_ip("198.51.100.7")  # RFC5737 → allowed
         assert find_disallowed_ips(ex) == []
-        ex2 = self._example_with_ip("9.9.9.9")       # public → flagged
+        ex2 = self._example_with_ip("9.9.9.9")  # public → flagged
         assert "9.9.9.9" in find_disallowed_ips(ex2)
         assert TrainingExampleLoader.tokenization_path_for("stix") == "A"
         assert TrainingExampleLoader.tokenization_path_for("unknown") == "A"
@@ -341,7 +359,10 @@ class TestIPEnforcement:
         """IP followed by a letter (e.g. '8.8.8.8G' in a log line) must still be caught.
         Old \\b regex misses this because \\b fails between two word chars (8 and G).
         """
-        ex = {"events": [{"data": {"msg": "connect to 8.8.8.8G port 443"}}], "labels": {}}
+        ex = {
+            "events": [{"data": {"msg": "connect to 8.8.8.8G port 443"}}],
+            "labels": {},
+        }
         with pytest.raises(RealIPInTrainingError):
             TrainingExampleLoader([ex])
 
@@ -371,8 +392,9 @@ class TestBaNELDetach:
         null_mask = torch.ones(B, S, dtype=torch.bool)
         loss = loss_fn(obs, base, null_mask)
         loss.backward()
-        assert base.grad is None or base.grad.abs().sum().item() == 0.0, \
-            "Gradient flowed into baseline stream — violates EMA-frozen semantics"
+        assert (
+            base.grad is None or base.grad.abs().sum().item() == 0.0
+        ), "Gradient flowed into baseline stream — violates EMA-frozen semantics"
 
 
 # ---------------------------------------------------------------------------
@@ -385,10 +407,10 @@ class TestKillChainLossMask:
         # Force logit for state 6 (EXFIL) very high while current state is 0 (RECON).
         # Without mask the model would pick state 6; with mask only 0→0 or 0→1 allowed.
         logits = torch.zeros(1, 7)
-        logits[0, 6] = 100.0          # EXFIL — invalid from RECON
-        logits[0, 1] = 10.0           # WEAPONIZE — valid advance
+        logits[0, 6] = 100.0  # EXFIL — invalid from RECON
+        logits[0, 1] = 10.0  # WEAPONIZE — valid advance
         current = torch.zeros(1, dtype=torch.long)  # RECON
-        target  = torch.ones(1, dtype=torch.long)   # WEAPONIZE
+        target = torch.ones(1, dtype=torch.long)  # WEAPONIZE
         loss = loss_fn(logits, target, current_states=current)
         assert torch.isfinite(loss)
         assert loss.item() >= 0
@@ -401,15 +423,23 @@ class TestNetFlowFieldDistinctness:
     def test_bytes_packets_duration_differ(self):
         """bytes/packets/duration embeddings must differ — they use separate projections."""
         from vajra.tokenization.path_b import NetFlowEncoder, NetFlowRecord
+
         torch.manual_seed(0)
         enc = NetFlowEncoder(d_model=64)
         rec = NetFlowRecord(
-            src_ip="10.0.0.1", dst_ip="10.0.0.2",
-            src_port=12345, dst_port=443, protocol=6,
-            bytes_sent=1_000_000, packets=700, duration_ms=250.0,
+            src_ip="10.0.0.1",
+            dst_ip="10.0.0.2",
+            src_port=12345,
+            dst_port=443,
+            protocol=6,
+            bytes_sent=1_000_000,
+            packets=700,
+            duration_ms=250.0,
         )
         fields = enc.encode_record(rec)
-        assert not torch.allclose(fields["bytes"], fields["packets"]), \
-            "bytes and packets embeddings are identical — per-field projections broken"
-        assert not torch.allclose(fields["bytes"], fields["duration"]), \
-            "bytes and duration embeddings are identical"
+        assert not torch.allclose(
+            fields["bytes"], fields["packets"]
+        ), "bytes and packets embeddings are identical — per-field projections broken"
+        assert not torch.allclose(
+            fields["bytes"], fields["duration"]
+        ), "bytes and duration embeddings are identical"

@@ -5,15 +5,16 @@ import torch
 
 from vajra.config import VajraConfig
 from vajra.tokenization.path_a import SentinelTokenizer
-from vajra.tokenization.path_b import CvssEncoder, NetFlowEncoder, IpEncoder, NetFlowRecord
-from vajra.tokenization.path_c import MitreKGEmbedding, InferenceGCN, GCNLayer
-from vajra.tokenization.tokenizer import VajraTokenizer, TokenizationPath
-
+from vajra.tokenization.path_b import (CvssEncoder, IpEncoder, NetFlowEncoder,
+                                       NetFlowRecord)
+from vajra.tokenization.path_c import GCNLayer, InferenceGCN, MitreKGEmbedding
+from vajra.tokenization.tokenizer import TokenizationPath, VajraTokenizer
 
 CFG = VajraConfig()
 
 
 # ── Path A ────────────────────────────────────────────────────────────────────
+
 
 class TestSentinelTokenizer:
 
@@ -46,6 +47,7 @@ class TestSentinelTokenizer:
 
 # ── Path B — CVSS ─────────────────────────────────────────────────────────────
 
+
 class TestCvssEncoder:
     CVSS_EXAMPLE = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
 
@@ -73,6 +75,7 @@ class TestCvssEncoder:
 
 # ── Path B — NetFlow ──────────────────────────────────────────────────────────
 
+
 class TestNetFlowEncoder:
 
     def _make_record(self) -> NetFlowRecord:
@@ -91,8 +94,16 @@ class TestNetFlowEncoder:
         enc = NetFlowEncoder(d_model=1024)
         rec = self._make_record()
         fields = enc.encode_record(rec)
-        assert set(fields.keys()) == {"src_ip", "dst_ip", "src_port", "dst_port",
-                                      "protocol", "bytes", "packets", "duration"}
+        assert set(fields.keys()) == {
+            "src_ip",
+            "dst_ip",
+            "src_port",
+            "dst_port",
+            "protocol",
+            "bytes",
+            "packets",
+            "duration",
+        }
 
     def test_field_shapes(self):
         enc = NetFlowEncoder(d_model=1024)
@@ -109,12 +120,13 @@ class TestNetFlowEncoder:
 
 # ── Path B — IP encoder ───────────────────────────────────────────────────────
 
+
 class TestIpEncoder:
 
     def test_rfc1918_one_hot(self):
         vec = IpEncoder.encode_ip("192.168.1.10")
         assert vec.shape == (257,)
-        assert vec[256].item() == 0.0   # not external
+        assert vec[256].item() == 0.0  # not external
         assert vec.sum().item() == 1.0  # exactly one bit set
 
     def test_external_ip(self):
@@ -130,22 +142,29 @@ class TestIpEncoder:
 
 # ── Path C — MITRE KG ─────────────────────────────────────────────────────────
 
+
 class TestMitreKGEmbedding:
 
     def test_output_shape(self):
-        model = MitreKGEmbedding(num_techniques=10, num_relations=4, d_kg=32, d_model=64)
+        model = MitreKGEmbedding(
+            num_techniques=10, num_relations=4, d_kg=32, d_model=64
+        )
         ids = torch.arange(5)
         adj = torch.eye(5)
         out = model(ids, adj)
         assert out.shape == (5, 64)
 
     def test_frozen_no_grad(self):
-        model = MitreKGEmbedding(num_techniques=10, num_relations=4, d_kg=32, d_model=64, frozen=True)
+        model = MitreKGEmbedding(
+            num_techniques=10, num_relations=4, d_kg=32, d_model=64, frozen=True
+        )
         for p in model.parameters():
             assert not p.requires_grad
 
     def test_freeze_unfreeze(self):
-        model = MitreKGEmbedding(num_techniques=10, num_relations=4, d_kg=32, d_model=64)
+        model = MitreKGEmbedding(
+            num_techniques=10, num_relations=4, d_kg=32, d_model=64
+        )
         model.freeze()
         assert not list(model.parameters())[0].requires_grad
         model.unfreeze()
@@ -153,6 +172,7 @@ class TestMitreKGEmbedding:
 
 
 # ── Path C — InferenceGCN ─────────────────────────────────────────────────────
+
 
 class TestInferenceGCN:
 
@@ -178,13 +198,15 @@ class TestInferenceGCN:
         adj[:, 0] = 1.0
         # Normalize so rows are ~1 (mimics D^-1/2 A D^-1/2 magnitude).
         adj = adj / adj.sum(dim=-1, keepdim=True).clamp(min=1e-9)
-        deg = model._degree_features(adj)            # (N, 32)
+        deg = model._degree_features(adj)  # (N, 32)
         # Hub (node 0, degree 5) must map to a different bin than a leaf (node 5).
-        assert not torch.allclose(deg[0], deg[5]), \
-            "Degree features collapsed — hub and leaf got the same embedding"
+        assert not torch.allclose(
+            deg[0], deg[5]
+        ), "Degree features collapsed — hub and leaf got the same embedding"
 
 
 # ── Unified tokenizer routing ─────────────────────────────────────────────────
+
 
 class TestVajraTokenizer:
 

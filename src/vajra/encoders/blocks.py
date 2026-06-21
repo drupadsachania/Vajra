@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
 # ── RoPE ─────────────────────────────────────────────────────────────────────
+
 
 class RotaryEmbedding(nn.Module):
     """Standard RoPE positional encoding, θ=10000."""
@@ -18,10 +19,12 @@ class RotaryEmbedding(nn.Module):
         inv_freq = 1.0 / (theta ** (torch.arange(0, dim, 2, dtype=torch.float32) / dim))
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
-    def forward(self, seq_len: int, device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self, seq_len: int, device: torch.device
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Returns (cos, sin) each of shape (seq_len, dim//2)."""
         t = torch.arange(seq_len, device=device, dtype=self.inv_freq.dtype)
-        freqs = torch.outer(t, self.inv_freq)       # (seq, dim/2)
+        freqs = torch.outer(t, self.inv_freq)  # (seq, dim/2)
         return freqs.cos(), freqs.sin()
 
 
@@ -52,6 +55,7 @@ def apply_rotary_pos_emb(
 
 # ── SwiGLU FFN ────────────────────────────────────────────────────────────────
 
+
 class SwiGLUFFN(nn.Module):
     """SwiGLU feed-forward: gate × SiLU(gate_proj(x)) · up_proj(x) → out_proj.
 
@@ -63,14 +67,15 @@ class SwiGLUFFN(nn.Module):
         inter = int(ffn_width * 2 / 3)
         inter = ((inter + 63) // 64) * 64  # round up to 64
         self.gate_proj = nn.Linear(d_model, inter, bias=False)
-        self.up_proj   = nn.Linear(d_model, inter, bias=False)
-        self.out_proj  = nn.Linear(inter, d_model, bias=False)
+        self.up_proj = nn.Linear(d_model, inter, bias=False)
+        self.out_proj = nn.Linear(inter, d_model, bias=False)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.out_proj(F.silu(self.gate_proj(x)) * self.up_proj(x))
 
 
 # ── Pre-LN Transformer Block ──────────────────────────────────────────────────
+
 
 class PreLNTransformerBlock(nn.Module):
     """Pre-LayerNorm transformer block (§4.1).
@@ -81,7 +86,9 @@ class PreLNTransformerBlock(nn.Module):
     Dropout: p=0.1 during training, 0 at inference.
     """
 
-    def __init__(self, d_model: int, n_heads: int, ffn_width: int, dropout: float = 0.1):
+    def __init__(
+        self, d_model: int, n_heads: int, ffn_width: int, dropout: float = 0.1
+    ):
         super().__init__()
         assert d_model % n_heads == 0
         self.d_model = d_model
@@ -129,7 +136,7 @@ class PreLNTransformerBlock(nn.Module):
         attn_w = F.softmax(attn_w, dim=-1)
         attn_w = self.dropout(attn_w)
 
-        attn_out = torch.matmul(attn_w, v)                         # (B, H, S, head_dim)
+        attn_out = torch.matmul(attn_w, v)  # (B, H, S, head_dim)
         attn_out = attn_out.transpose(1, 2).contiguous().view(B, S, D)
         attn_out = self.o_proj(attn_out)
 

@@ -6,6 +6,7 @@ Exports:
 
 Dynamic axes: batch_size, sequence_length.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -13,7 +14,6 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
-
 
 ONNX_OPSET = 17
 
@@ -78,8 +78,8 @@ def export_decoder(
 ) -> Path:
     """Export the constrained decoder graph to ONNX opset 17."""
     path = Path(path)
-    dummy_ids   = torch.randint(0, 100, (1, tgt_len))
-    dummy_enc   = torch.randn(1, afn_top_k, d_model)
+    dummy_ids = torch.randint(0, 100, (1, tgt_len))
+    dummy_enc = torch.randn(1, afn_top_k, d_model)
     torch.onnx.export(
         decoder_model,
         (dummy_ids, dummy_enc),
@@ -88,9 +88,9 @@ def export_decoder(
         input_names=["input_ids", "afn_encoder_states"],
         output_names=["logits"],
         dynamic_axes={
-            "input_ids":          {0: "batch_size", 1: "sequence_length"},
+            "input_ids": {0: "batch_size", 1: "sequence_length"},
             "afn_encoder_states": {0: "batch_size"},
-            "logits":             {0: "batch_size", 1: "sequence_length"},
+            "logits": {0: "batch_size", 1: "sequence_length"},
         },
         do_constant_folding=True,
         dynamo=False,

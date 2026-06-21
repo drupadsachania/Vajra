@@ -29,7 +29,9 @@ class OntologyEmbedding(nn.Module):
         frozen: bool = True,
     ):
         super().__init__()
-        self.mitre_kg = MitreKGEmbedding(num_techniques, num_relations, d_kg, d_model, frozen)
+        self.mitre_kg = MitreKGEmbedding(
+            num_techniques, num_relations, d_kg, d_model, frozen
+        )
         self.absent_vector = nn.Parameter(torch.zeros(d_model))
 
     def forward(
@@ -46,12 +48,14 @@ class OntologyEmbedding(nn.Module):
         """
         if node_ids is None or adj is None:
             return self.absent_vector.expand(batch, seq, -1)
-        node_embs = self.mitre_kg(node_ids, adj)   # (N, d_model)
+        node_embs = self.mitre_kg(node_ids, adj)  # (N, d_model)
         # Pad or truncate to seq length, replicate across batch
         target = seq
         if node_embs.shape[0] >= target:
             out = node_embs[:target]
         else:
-            pad = self.absent_vector.unsqueeze(0).expand(target - node_embs.shape[0], -1)
+            pad = self.absent_vector.unsqueeze(0).expand(
+                target - node_embs.shape[0], -1
+            )
             out = torch.cat([node_embs, pad], dim=0)
         return out.unsqueeze(0).expand(batch, -1, -1)
