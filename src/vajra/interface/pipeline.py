@@ -4,6 +4,7 @@ Routes events → tokenization paths → embedding → 7 domain encoders (parall
 AFN → epistemic fusion (F3/F6 taps, optional early-exit) → output heads →
 optional constrained decoder → VajraInferenceResponse.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -14,25 +15,28 @@ from typing import Optional
 import torch
 import torch.nn as nn
 
-from vajra.config import VajraConfig
 from vajra.afn import ActivationFlowNetwork
+from vajra.config import VajraConfig
+from vajra.decoder.decoder import ConstrainedDecoder
 from vajra.embedding.embedding_layer import EmbeddingLayer
 from vajra.encoders.domain_encoders import build_domain_encoders
 from vajra.fusion.epistemic_fusion import EpistemicFusionLayer
 from vajra.heads.dag_head import EvidenceDAGHead
-from vajra.heads.technique_head import ATTACKClassifier
 from vajra.heads.decision_head import apply_dcat_override
-from vajra.decoder.decoder import ConstrainedDecoder
+from vajra.heads.technique_head import ATTACKClassifier
 
-from .types import (
-    VajraInferenceRequest, VajraInferenceResponse,
-    EvidenceDAG, AFNScore as AFNScoreType,
-    DAGNode, DAGEdge,
-)
+from .types import AFNScore as AFNScoreType
+from .types import (DAGEdge, DAGNode, EvidenceDAG, VajraInferenceRequest,
+                    VajraInferenceResponse)
 
 DOMAIN_ORDER = [
-    "detection_network", "forensics_provenance", "cti_stix",
-    "vulnerability_risk", "identity_access", "incident_response", "compliance",
+    "detection_network",
+    "forensics_provenance",
+    "cti_stix",
+    "vulnerability_risk",
+    "identity_access",
+    "incident_response",
+    "compliance",
 ]
 
 
@@ -79,26 +83,31 @@ class VajraInferencePipeline(nn.Module):
         self.embedding = nn.Embedding(cfg.embedding.vocabulary_size, d)
 
         # Tiny domain encoders: 1 layer, d=64
-        self.domain_encoders = nn.ModuleDict({
-            domain: DomainEncoder(layers=1, d_model=d, n_heads=4, ffn_width=128)
-            for domain in DOMAIN_ORDER
-        })
+        self.domain_encoders = nn.ModuleDict(
+            {
+                domain: DomainEncoder(layers=1, d_model=d, n_heads=4, ffn_width=128)
+                for domain in DOMAIN_ORDER
+            }
+        )
         self._domain_d_model = {domain: d for domain in DOMAIN_ORDER}
 
         # Projections to shared d=1024 for fusion
-        self._to_fusion = nn.ModuleDict({
-            domain: nn.Linear(d, 1024, bias=False)
-            for domain in DOMAIN_ORDER
-        })
+        self._to_fusion = nn.ModuleDict(
+            {domain: nn.Linear(d, 1024, bias=False) for domain in DOMAIN_ORDER}
+        )
 
         self.afn = ActivationFlowNetwork(top_k=cfg.afn.top_k)
         self.fusion = EpistemicFusionLayer(cfg)
 
-        self.dag_head    = EvidenceDAGHead(n_domains=7, d_model=1024)
+        self.dag_head = EvidenceDAGHead(n_domains=7, d_model=1024)
         self.attack_head = ATTACKClassifier(d_model=1024)
         self.decoder = ConstrainedDecoder(
             vocab_size=cfg.embedding.vocabulary_size,
-            d_model=1024, n_heads=4, n_layers=2, ffn_width=256, dropout=0.0,
+            d_model=1024,
+            n_heads=4,
+            n_layers=2,
+            ffn_width=256,
+            dropout=0.0,
         )
         self._tiny = True
 
@@ -109,17 +118,25 @@ class VajraInferencePipeline(nn.Module):
         self._domain_d_model = {d: cfg.domain_encoders[d].d_model for d in DOMAIN_ORDER}
 
         # Projections from domain d_model → shared 1024 for fusion
-        self._to_fusion = nn.ModuleDict({
-            domain: nn.Linear(cfg.domain_encoders[domain].d_model, cfg.shared_d_model, bias=False)
-            if cfg.domain_encoders[domain].d_model != cfg.shared_d_model
-            else nn.Identity()
-            for domain in DOMAIN_ORDER
-        })
+        self._to_fusion = nn.ModuleDict(
+            {
+                domain: (
+                    nn.Linear(
+                        cfg.domain_encoders[domain].d_model,
+                        cfg.shared_d_model,
+                        bias=False,
+                    )
+                    if cfg.domain_encoders[domain].d_model != cfg.shared_d_model
+                    else nn.Identity()
+                )
+                for domain in DOMAIN_ORDER
+            }
+        )
 
         self.afn = ActivationFlowNetwork(top_k=cfg.afn.top_k)
         self.fusion = EpistemicFusionLayer(cfg)
 
-        self.dag_head    = EvidenceDAGHead(n_domains=7, d_model=cfg.shared_d_model)
+        self.dag_head = EvidenceDAGHead(n_domains=7, d_model=cfg.shared_d_model)
         self.attack_head = ATTACKClassifier(d_model=cfg.shared_d_model)
         self.decoder = ConstrainedDecoder(
             vocab_size=cfg.embedding.vocabulary_size,
@@ -144,6 +161,7 @@ class VajraInferencePipeline(nn.Module):
         else:
             from vajra.encoders.base_encoder import DomainEncoder
             from vajra.encoders.long_context import InterleavedAttentionEncoder
+
             if isinstance(enc, DomainEncoder):
                 hidden, cls = enc(input_tensor)
                 afn_hidden = enc.afn_hidden
@@ -183,7 +201,7 @@ class VajraInferencePipeline(nn.Module):
         vocab = self.cfg.embedding.vocabulary_size
         for domain in DOMAIN_ORDER:
             ids = _event_token_ids(events_by_domain[domain], vocab, device)  # (1, seq)
-            domain_inputs[domain] = self.embedding(ids)                      # (1, seq, d)
+            domain_inputs[domain] = self.embedding(ids)  # (1, seq, d)
 
         # --- Run 7 domain encoders (parallel via ThreadPoolExecutor) ---
         cls_tokens: dict[str, Optional[torch.Tensor]] = {d: None for d in DOMAIN_ORDER}
@@ -205,7 +223,9 @@ class VajraInferencePipeline(nn.Module):
             cls = cls_tokens[domain]
             if cls is None:
                 # DOMAIN_ABSENT — fusion layer handles substitution via its parameter
-                cls_1024 = self.fusion.domain_absent.unsqueeze(0).unsqueeze(0)  # (1, 1, 1024)
+                cls_1024 = self.fusion.domain_absent.unsqueeze(0).unsqueeze(
+                    0
+                )  # (1, 1, 1024)
             else:
                 proj = self._to_fusion[domain]
                 cls_1024 = proj(cls).unsqueeze(1)  # (1, 1, 1024)
@@ -222,8 +242,8 @@ class VajraInferencePipeline(nn.Module):
         early_exit = fusion_result.early_exit
 
         # --- Decision state (F6 full tap, or F3 logits when early-exit fired) ---
-        decision_logits = fusion_result.decision_logits   # (1, 4)
-        decision_state_probs = fusion_result.decision_probs    # (1, 4)
+        decision_logits = fusion_result.decision_logits  # (1, 4)
+        decision_state_probs = fusion_result.decision_probs  # (1, 4)
         decision_class = decision_logits.argmax(dim=-1).item()
         decision_probs = decision_state_probs[0].tolist()
         confidence = float(decision_state_probs[0].max().item())
@@ -243,13 +263,14 @@ class VajraInferencePipeline(nn.Module):
         )
 
         # --- ATT&CK technique head (reads the post-fusion representation, §6.3) ---
-        fused_cls = fusion_result.fused_repr             # (1, d_model) post-fusion
+        fused_cls = fusion_result.fused_repr  # (1, d_model) post-fusion
         if fused_cls is None:
             fused_cls = fusion_input[:, 0, :]
-        technique_logits = self.attack_head(fused_cls)   # (1, 716) — raw logits
+        technique_logits = self.attack_head(fused_cls)  # (1, 716) — raw logits
         technique_probs = torch.sigmoid(technique_logits)[0]  # (716,)
         technique_ids = [
-            f"T{1000 + i}" for i, p in enumerate(technique_probs.tolist())
+            f"T{1000 + i}"
+            for i, p in enumerate(technique_probs.tolist())
             if p > self.attack_head.THRESHOLD
         ]
 
@@ -260,15 +281,21 @@ class VajraInferencePipeline(nn.Module):
         # --- AFN scores for response ---
         afn_score_list: list[AFNScoreType] = []
         for domain, score in afn_scores_raw.items():
-            for idx, imp in zip(score.token_indices.tolist(), score.importance_scores.tolist()):
-                afn_score_list.append(AFNScoreType(domain=domain, token_index=idx, importance=imp))
+            for idx, imp in zip(
+                score.token_indices.tolist(), score.importance_scores.tolist()
+            ):
+                afn_score_list.append(
+                    AFNScoreType(domain=domain, token_index=idx, importance=imp)
+                )
 
         # --- Constrained decoder (only for classes 0/1 + justification requested) ---
         justification_trace = ""
 
         if request.request_justification_trace and decision_class in (0, 1):
             # Gather AFN top-16 tokens for the first available domain
-            first_domain = next((d for d in DOMAIN_ORDER if afn_hiddens.get(d) is not None), None)
+            first_domain = next(
+                (d for d in DOMAIN_ORDER if afn_hiddens.get(d) is not None), None
+            )
             if first_domain is not None:
                 afn_h = afn_hiddens[first_domain]
                 score = afn_scores_raw.get(first_domain)

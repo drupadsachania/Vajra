@@ -4,14 +4,16 @@ import pytest
 import torch
 
 from vajra.config import VajraConfig
-from vajra.encoders.dcat import DCATBlock, BaselineCache, _stable_kl_div
-from vajra.encoders.long_context import InterleavedAttentionEncoder, _GlobalBlock, _LocalBlock
+from vajra.encoders.dcat import BaselineCache, DCATBlock, _stable_kl_div
 from vajra.encoders.domain_encoders import build_domain_encoders
+from vajra.encoders.long_context import (InterleavedAttentionEncoder,
+                                         _GlobalBlock, _LocalBlock)
 
 CFG = VajraConfig()
 
 
 # ── KL divergence helper ──────────────────────────────────────────────────────
+
 
 class TestStableKLDiv:
 
@@ -34,6 +36,7 @@ class TestStableKLDiv:
 
 
 # ── Baseline Cache ────────────────────────────────────────────────────────────
+
 
 class TestBaselineCache:
 
@@ -61,7 +64,7 @@ class TestBaselineCache:
         frozen_val = cache.get(fallback=s1).clone()
 
         s2 = torch.ones(1, 4, 64)
-        cache.update(s2, decision_class=1)   # should NOT change cache
+        cache.update(s2, decision_class=1)  # should NOT change cache
         val_after = cache.get(fallback=s1)
         torch.testing.assert_close(frozen_val, val_after)
 
@@ -75,6 +78,7 @@ class TestBaselineCache:
 
 
 # ── DCAT Block ────────────────────────────────────────────────────────────────
+
 
 class TestDCATBlock:
 
@@ -94,9 +98,9 @@ class TestDCATBlock:
         # Initialize the cache to x so baseline == observed
         block.baseline_cache.update(x, decision_class=0)
         out, div = block(x, decision_class=2)
-        assert div.abs().max().item() < 1e-3, (
-            f"KL divergence should be ≈0 when X==B, got max={div.abs().max().item()}"
-        )
+        assert (
+            div.abs().max().item() < 1e-3
+        ), f"KL divergence should be ≈0 when X==B, got max={div.abs().max().item()}"
 
     def test_divergence_nonzero_for_different_streams(self):
         block = self._make_block()
@@ -105,7 +109,9 @@ class TestDCATBlock:
         baseline = torch.randn(1, 8, 64) * 10
         block.baseline_cache.update(baseline, decision_class=0)
         _, div = block(x, decision_class=2)
-        assert div.max().item() > 1e-6, "KL divergence should be non-zero for divergent streams"
+        assert (
+            div.max().item() > 1e-6
+        ), "KL divergence should be non-zero for divergent streams"
 
     def test_kl_nonnegative(self):
         block = self._make_block()
@@ -124,34 +130,46 @@ class TestDCATBlock:
 
 # ── InterleavedAttentionEncoder ────────────────────────────────────────────────
 
+
 class TestInterleavedAttentionEncoder:
 
     def test_output_shape_small(self):
-        enc = InterleavedAttentionEncoder(d_model=64, n_heads=4, n_layers=4, ffn_width=256)
+        enc = InterleavedAttentionEncoder(
+            d_model=64, n_heads=4, n_layers=4, ffn_width=256
+        )
         x = torch.randn(1, 32, 64)
         hidden, cls = enc(x)
         assert hidden.shape == (1, 32, 64)
         assert cls.shape == (1, 64)
 
     def test_dcat_divergence_populated(self):
-        enc = InterleavedAttentionEncoder(d_model=64, n_heads=4, n_layers=8, ffn_width=256)
+        enc = InterleavedAttentionEncoder(
+            d_model=64, n_heads=4, n_layers=8, ffn_width=256
+        )
         x = torch.randn(1, 16, 64)
         enc(x)
         assert enc.last_dcat_divergence is not None
 
     def test_global_layers_exist(self):
-        enc = InterleavedAttentionEncoder(d_model=64, n_heads=4, n_layers=12, ffn_width=256)
+        enc = InterleavedAttentionEncoder(
+            d_model=64, n_heads=4, n_layers=12, ffn_width=256
+        )
         global_count = sum(1 for b in enc.blocks if isinstance(b, _GlobalBlock))
         assert global_count > 0, "Should have at least one global NoPE layer"
 
     def test_dcat_layers_exist(self):
-        enc = InterleavedAttentionEncoder(d_model=64, n_heads=4, n_layers=12, ffn_width=256)
+        enc = InterleavedAttentionEncoder(
+            d_model=64, n_heads=4, n_layers=12, ffn_width=256
+        )
         from vajra.encoders.dcat import DCATBlock
+
         dcat_count = sum(1 for b in enc.blocks if isinstance(b, DCATBlock))
         assert dcat_count == 2, f"Should have exactly 2 DCAT layers, got {dcat_count}"
 
     def test_afn_hidden_populated_12l(self):
-        enc = InterleavedAttentionEncoder(d_model=64, n_heads=4, n_layers=12, ffn_width=256)
+        enc = InterleavedAttentionEncoder(
+            d_model=64, n_heads=4, n_layers=12, ffn_width=256
+        )
         x = torch.randn(1, 8, 64)
         enc(x)
         assert enc.afn_hidden is not None
@@ -173,7 +191,9 @@ class TestInterleavedAttentionEncoder:
 
     def test_dcat_divergence_shape_detection(self):
         """DCAT D_divergence shape correct for Detection encoder."""
-        enc = InterleavedAttentionEncoder(d_model=64, n_heads=4, n_layers=12, ffn_width=256)
+        enc = InterleavedAttentionEncoder(
+            d_model=64, n_heads=4, n_layers=12, ffn_width=256
+        )
         x = torch.randn(1, 16, 64)
         enc(x)
         div = enc.last_dcat_divergence
@@ -182,6 +202,7 @@ class TestInterleavedAttentionEncoder:
 
 
 # ── Updated domain encoder tests (include Detection/Forensics) ────────────────
+
 
 class TestAllDomainEncoders:
 

@@ -16,24 +16,24 @@ import torch.nn.functional as F
 
 from vajra.config import VajraConfig
 from vajra.encoders.blocks import PreLNTransformerBlock
-from .kill_chain import KillChainStateMachine, N_STATES
 
+from .kill_chain import N_STATES, KillChainStateMachine
 
-N_DOMAINS = 7                   # seven domain encoders
-FAST_EXIT_DEFER_THRESH  = 0.92  # p(class=2) > this → early exit
-FAST_EXIT_INSUF_THRESH  = 0.85  # p(class=3) > this → early exit
+N_DOMAINS = 7  # seven domain encoders
+FAST_EXIT_DEFER_THRESH = 0.92  # p(class=2) > this → early exit
+FAST_EXIT_INSUF_THRESH = 0.85  # p(class=3) > this → early exit
 
 
 @dataclass
 class EarlyExitResult:
-    decision_logits: torch.Tensor        # (batch, 4) — F3 on early-exit, F6 otherwise
-    decision_probs:  torch.Tensor        # (batch, 4)
-    kill_chain_state: torch.Tensor       # (batch,) current KC state
+    decision_logits: torch.Tensor  # (batch, 4) — F3 on early-exit, F6 otherwise
+    decision_probs: torch.Tensor  # (batch, 4)
+    kill_chain_state: torch.Tensor  # (batch,) current KC state
     early_exit: bool
-    exit_block: int                      # 3 for F3 early-exit, 6 for F6
+    exit_block: int  # 3 for F3 early-exit, 6 for F6
     # F3 tap always populated (hard constraint: markers at F3 and F6 on every call)
     f3_logits: torch.Tensor | None = None  # (batch, 4)
-    f3_probs:  torch.Tensor | None = None  # (batch, 4)
+    f3_probs: torch.Tensor | None = None  # (batch, 4)
     # Per-block kill-chain transition logits (for the EXPERIMENT-2 multi-task
     # objective — these are the trainable signal; the argmax state update is not).
     kc_logits: torch.Tensor | None = None  # (batch, n_blocks_run, 7)
@@ -60,15 +60,17 @@ class EpistemicFusionLayer(nn.Module):
 
         self.domain_absent = nn.Parameter(torch.zeros(d))
 
-        self.blocks = nn.ModuleList([
-            PreLNTransformerBlock(d, fc.attention_heads, fc.ffn_width)
-            for _ in range(self.N_BLOCKS)
-        ])
+        self.blocks = nn.ModuleList(
+            [
+                PreLNTransformerBlock(d, fc.attention_heads, fc.ffn_width)
+                for _ in range(self.N_BLOCKS)
+            ]
+        )
 
         # Kill-chain state machine at each block
-        self.kc_heads = nn.ModuleList([
-            KillChainStateMachine(d) for _ in range(self.N_BLOCKS)
-        ])
+        self.kc_heads = nn.ModuleList(
+            [KillChainStateMachine(d) for _ in range(self.N_BLOCKS)]
+        )
 
         # F3 and F6 decision taps
         self.f3_head = nn.Linear(d, self.N_CLASSES)
@@ -84,7 +86,7 @@ class EpistemicFusionLayer(nn.Module):
         """
         if present_mask is None:
             return domain_cls
-        absent = ~present_mask   # (batch, 7)
+        absent = ~present_mask  # (batch, 7)
         absent_3d = absent.unsqueeze(-1).expand_as(domain_cls)
         absent_tok = self.domain_absent.unsqueeze(0).unsqueeze(0).expand_as(domain_cls)
         return torch.where(absent_3d, absent_tok, domain_cls)
@@ -115,16 +117,16 @@ class EpistemicFusionLayer(nn.Module):
         kc_logits_per_block: list[torch.Tensor] = []
 
         for i, (block, kc_head) in enumerate(zip(self.blocks, self.kc_heads)):
-            x = block(x)   # (batch, 7, d_model)
+            x = block(x)  # (batch, 7, d_model)
 
             # Kill-chain update using mean CLS representation
-            cls_mean = x.mean(dim=1)   # (batch, d_model)
+            cls_mean = x.mean(dim=1)  # (batch, d_model)
             kc_block_logits, kc_state = kc_head(cls_mean, kc_state)
             kc_logits_per_block.append(kc_block_logits)
 
-            if i == 2:   # F3 tap (0-indexed block 2 = F3)
-                f3_logits = self.f3_head(cls_mean)    # (batch, 4)
-                f3_probs  = F.softmax(f3_logits, dim=-1)
+            if i == 2:  # F3 tap (0-indexed block 2 = F3)
+                f3_logits = self.f3_head(cls_mean)  # (batch, 4)
+                f3_probs = F.softmax(f3_logits, dim=-1)
 
                 defer_flag = f3_probs[:, 2] > FAST_EXIT_DEFER_THRESH
                 insuf_flag = f3_probs[:, 3] > FAST_EXIT_INSUF_THRESH
@@ -144,7 +146,7 @@ class EpistemicFusionLayer(nn.Module):
         # F6 tap (all 6 blocks completed)
         cls_mean = x.mean(dim=1)
         f6_logits = self.f6_head(cls_mean)
-        f6_probs  = F.softmax(f6_logits, dim=-1)
+        f6_probs = F.softmax(f6_logits, dim=-1)
 
         return EarlyExitResult(
             decision_logits=f6_logits,

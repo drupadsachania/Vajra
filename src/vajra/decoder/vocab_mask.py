@@ -25,7 +25,6 @@ from typing import Protocol
 import torch
 import torch.nn as nn
 
-
 _DEFAULT_BLOCKLIST_PATH = Path(__file__).with_name("blocklist.json")
 
 # Sentinel token IDs occupy the top 20 slots of the default 50,428 vocab
@@ -86,7 +85,11 @@ class VocabularyMask(nn.Module):
         super().__init__()
         self.vocab_size = vocab_size
 
-        path = Path(blocklist_path) if blocklist_path is not None else _DEFAULT_BLOCKLIST_PATH
+        path = (
+            Path(blocklist_path)
+            if blocklist_path is not None
+            else _DEFAULT_BLOCKLIST_PATH
+        )
         blocklist = _load_blocklist(path)
 
         # 1) Structural sentinel block — always applied (top _N_SENTINELS slots).

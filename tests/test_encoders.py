@@ -4,17 +4,16 @@ import pytest
 import torch
 
 from vajra.config import VajraConfig
-from vajra.encoders.blocks import (
-    RotaryEmbedding, SwiGLUFFN, PreLNTransformerBlock,
-    apply_rotary_pos_emb,
-)
-from vajra.encoders.base_encoder import DomainEncoder, _AFN_LAYER_MAP
+from vajra.encoders.base_encoder import _AFN_LAYER_MAP, DomainEncoder
+from vajra.encoders.blocks import (PreLNTransformerBlock, RotaryEmbedding,
+                                   SwiGLUFFN, apply_rotary_pos_emb)
 from vajra.encoders.domain_encoders import build_domain_encoders
 
 CFG = VajraConfig()
 
 
 # ── RoPE ─────────────────────────────────────────────────────────────────────
+
 
 class TestRotaryEmbedding:
 
@@ -37,6 +36,7 @@ class TestRotaryEmbedding:
 
 # ── SwiGLU FFN ────────────────────────────────────────────────────────────────
 
+
 class TestSwiGLUFFN:
 
     def test_output_shape(self):
@@ -54,6 +54,7 @@ class TestSwiGLUFFN:
 
 
 # ── Pre-LN Block ──────────────────────────────────────────────────────────────
+
 
 class TestPreLNTransformerBlock:
 
@@ -81,38 +82,54 @@ class TestPreLNTransformerBlock:
 
 # ── DomainEncoder ─────────────────────────────────────────────────────────────
 
+
 class TestDomainEncoder:
 
-    @pytest.mark.parametrize("domain", [
-        "cti_stix", "vulnerability_risk", "identity_access",
-        "incident_response", "compliance",
-    ])
+    @pytest.mark.parametrize(
+        "domain",
+        [
+            "cti_stix",
+            "vulnerability_risk",
+            "identity_access",
+            "incident_response",
+            "compliance",
+        ],
+    )
     def test_cls_token_shape(self, domain):
         enc_cfg = CFG.domain_encoders[domain]
         enc = DomainEncoder(
-            layers=enc_cfg.layers, d_model=enc_cfg.d_model,
-            n_heads=enc_cfg.attention_heads, ffn_width=enc_cfg.ffn_width,
+            layers=enc_cfg.layers,
+            d_model=enc_cfg.d_model,
+            n_heads=enc_cfg.attention_heads,
+            ffn_width=enc_cfg.ffn_width,
         )
         x = torch.randn(2, 128, enc_cfg.d_model)
         _, cls = enc(x)
         assert cls.shape == (2, enc_cfg.d_model)
 
-    @pytest.mark.parametrize("domain,expected_layers", [
-        ("cti_stix", 8), ("identity_access", 6), ("compliance", 4),
-    ])
+    @pytest.mark.parametrize(
+        "domain,expected_layers",
+        [
+            ("cti_stix", 8),
+            ("identity_access", 6),
+            ("compliance", 4),
+        ],
+    )
     def test_layer_count(self, domain, expected_layers):
         enc_cfg = CFG.domain_encoders[domain]
         enc = DomainEncoder(
-            layers=enc_cfg.layers, d_model=enc_cfg.d_model,
-            n_heads=enc_cfg.attention_heads, ffn_width=enc_cfg.ffn_width,
+            layers=enc_cfg.layers,
+            d_model=enc_cfg.d_model,
+            n_heads=enc_cfg.attention_heads,
+            ffn_width=enc_cfg.ffn_width,
         )
         assert len(enc.blocks) == expected_layers
 
     def test_afn_layer_targets(self):
         assert _AFN_LAYER_MAP[12] == 8
-        assert _AFN_LAYER_MAP[8]  == 6
-        assert _AFN_LAYER_MAP[6]  == 4
-        assert _AFN_LAYER_MAP[4]  == 3
+        assert _AFN_LAYER_MAP[8] == 6
+        assert _AFN_LAYER_MAP[6] == 4
+        assert _AFN_LAYER_MAP[4] == 3
 
     def test_afn_hidden_populated(self):
         enc = DomainEncoder(layers=4, d_model=64, n_heads=4, ffn_width=256)
@@ -129,29 +146,34 @@ class TestDomainEncoder:
                 ea, eb = encs[domains[i]], encs[domains[j]]
                 for pa in ea.parameters():
                     for pb in eb.parameters():
-                        assert pa is not pb, (
-                            f"Shared weight found between {domains[i]} and {domains[j]}"
-                        )
+                        assert (
+                            pa is not pb
+                        ), f"Shared weight found between {domains[i]} and {domains[j]}"
 
-    @pytest.mark.parametrize("domain,approx_params,tolerance", [
-        # Actual SwiGLU intermediate = floor(ffn_width * 2/3), rounded to 64.
-        # Spec "params_approx" values assumed full ffn_width; true counts are lower.
-        ("cti_stix",       56_649_216, 0.02),
-        ("identity_access",42_487_296, 0.02),
-        ("compliance",     12_854_272, 0.02),
-    ])
+    @pytest.mark.parametrize(
+        "domain,approx_params,tolerance",
+        [
+            # Actual SwiGLU intermediate = floor(ffn_width * 2/3), rounded to 64.
+            # Spec "params_approx" values assumed full ffn_width; true counts are lower.
+            ("cti_stix", 56_649_216, 0.02),
+            ("identity_access", 42_487_296, 0.02),
+            ("compliance", 12_854_272, 0.02),
+        ],
+    )
     def test_param_counts(self, domain, approx_params, tolerance):
         enc_cfg = CFG.domain_encoders[domain]
         enc = DomainEncoder(
-            layers=enc_cfg.layers, d_model=enc_cfg.d_model,
-            n_heads=enc_cfg.attention_heads, ffn_width=enc_cfg.ffn_width,
+            layers=enc_cfg.layers,
+            d_model=enc_cfg.d_model,
+            n_heads=enc_cfg.attention_heads,
+            ffn_width=enc_cfg.ffn_width,
         )
         n = sum(p.numel() for p in enc.parameters())
         lo = approx_params * (1 - tolerance)
         hi = approx_params * (1 + tolerance)
-        assert lo <= n <= hi, (
-            f"{domain}: param count {n:,} outside [{lo:,.0f}, {hi:,.0f}]"
-        )
+        assert (
+            lo <= n <= hi
+        ), f"{domain}: param count {n:,} outside [{lo:,.0f}, {hi:,.0f}]"
 
     def test_hidden_states_shape(self):
         enc = DomainEncoder(layers=4, d_model=64, n_heads=4, ffn_width=256)

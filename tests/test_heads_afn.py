@@ -1,21 +1,23 @@
 """Tests for Chunk 6 — output heads (DAG, ATT&CK, decision, calibration) + AFN."""
 
 import time
+
 import pytest
 import torch
 
-from vajra.config import VajraConfig
-from vajra.heads.dag_head import EvidenceDAGHead
-from vajra.heads.technique_head import ATTACKClassifier
-from vajra.heads.decision_head import DecisionStateClassifier
-from vajra.heads.calibration import TemperatureScaler, ConformalPredictor
 from vajra.afn import ActivationFlowNetwork, AFNScore
+from vajra.config import VajraConfig
+from vajra.heads.calibration import ConformalPredictor, TemperatureScaler
+from vajra.heads.dag_head import EvidenceDAGHead
+from vajra.heads.decision_head import DecisionStateClassifier
+from vajra.heads.technique_head import ATTACKClassifier
 
 CFG = VajraConfig()
 D = CFG.shared_d_model
 
 
 # ── Evidence DAG Head ─────────────────────────────────────────────────────────
+
 
 class TestEvidenceDAGHead:
 
@@ -35,6 +37,7 @@ class TestEvidenceDAGHead:
 
 # ── ATT&CK Classifier ─────────────────────────────────────────────────────────
 
+
 class TestATTACKClassifier:
 
     def test_output_shape(self):
@@ -49,8 +52,9 @@ class TestATTACKClassifier:
         x = torch.randn(4, D)
         logits = clf(x)
         # Raw logits from a Linear are unbounded — some should be outside [0, 1].
-        assert not ((logits >= 0).all() and (logits <= 1).all()), \
-            "forward() returned values in [0,1]; it should return raw logits"
+        assert not (
+            (logits >= 0).all() and (logits <= 1).all()
+        ), "forward() returned values in [0,1]; it should return raw logits"
 
     def test_predict_returns_probabilities_in_01(self):
         clf = ATTACKClassifier(d_model=D)
@@ -74,6 +78,7 @@ class TestATTACKClassifier:
 
 # ── Decision State Classifier ─────────────────────────────────────────────────
 
+
 class TestDecisionStateClassifier:
 
     def test_output_shapes(self):
@@ -81,8 +86,8 @@ class TestDecisionStateClassifier:
         x = torch.randn(2, D)
         logits, probs, dec = clf(x)
         assert logits.shape == (2, 4)
-        assert probs.shape  == (2, 4)
-        assert dec.shape    == (2,)
+        assert probs.shape == (2, 4)
+        assert dec.shape == (2,)
 
     def test_probs_sum_to_one(self):
         clf = DecisionStateClassifier(d_model=D)
@@ -100,7 +105,7 @@ class TestDecisionStateClassifier:
             clf.head.bias = torch.nn.Parameter(
                 torch.tensor([-100.0, -100.0, 100.0, -100.0])
             )
-        dcat_div = torch.tensor([5.0])   # > theta=1.0
+        dcat_div = torch.tensor([5.0])  # > theta=1.0
         _, _, dec = clf(x, dcat_divergence=dcat_div, theta_divergence=1.0)
         assert dec.item() == 1, f"Expected DCAT override to class=1, got {dec.item()}"
 
@@ -111,14 +116,15 @@ class TestDecisionStateClassifier:
         with torch.no_grad():
             clf.head.weight.zero_()
             clf.head.bias = torch.nn.Parameter(
-                torch.tensor([100.0, -100.0, -100.0, -100.0])   # class=0
+                torch.tensor([100.0, -100.0, -100.0, -100.0])  # class=0
             )
-        dcat_div = torch.tensor([100.0])   # very high divergence
+        dcat_div = torch.tensor([100.0])  # very high divergence
         _, _, dec = clf(x, dcat_divergence=dcat_div, theta_divergence=1.0)
         assert dec.item() == 0, "Class=0 should NOT be overridden"
 
 
 # ── Temperature Scaler ────────────────────────────────────────────────────────
+
 
 class TestTemperatureScaler:
 
@@ -140,6 +146,7 @@ class TestTemperatureScaler:
 
 # ── Conformal Predictor ────────────────────────────────────────────────────────
 
+
 class TestConformalPredictor:
 
     def test_calibrate_and_predict(self):
@@ -160,6 +167,7 @@ class TestConformalPredictor:
 
 
 # ── AFN ───────────────────────────────────────────────────────────────────────
+
 
 class TestActivationFlowNetwork:
 
@@ -189,6 +197,7 @@ class TestActivationFlowNetwork:
     def test_afn_layer_correct_for_12l(self):
         """12-layer encoder should use L8 (0-indexed 7)."""
         from vajra.encoders.base_encoder import _AFN_LAYER_MAP
+
         assert _AFN_LAYER_MAP[12] == 8
 
     def test_afn_timing_under_15ms(self):
@@ -212,6 +221,6 @@ class TestActivationFlowNetwork:
         """Token with highest L2 norm should always be in top-k."""
         afn = ActivationFlowNetwork(top_k=4)
         hidden = torch.zeros(1, 16, 32)
-        hidden[0, 7, :] = 100.0   # token 7 has enormous norm
+        hidden[0, 7, :] = 100.0  # token 7 has enormous norm
         score = afn.score_domain(hidden, "norm_test")
         assert 7 in score.token_indices.tolist()

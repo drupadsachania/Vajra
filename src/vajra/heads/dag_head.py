@@ -29,6 +29,6 @@ class EvidenceDAGHead(nn.Module):
         Returns    : (batch, 32, 32) — raw logits for adjacency matrix
         """
         B = domain_cls.shape[0]
-        flat = domain_cls.reshape(B, -1)             # (batch, 7*d_model)
-        adj_flat = self.mlp(flat)                    # (batch, 32*32)
+        flat = domain_cls.reshape(B, -1)  # (batch, 7*d_model)
+        adj_flat = self.mlp(flat)  # (batch, 32*32)
         return adj_flat.reshape(B, self.MAX_NODES, self.MAX_NODES)

@@ -5,9 +5,22 @@ import torch.nn as nn
 
 # The 16 source types referenced in §3
 SOURCE_TYPES = [
-    "evtx", "sysmon", "netflow", "dns", "http",
-    "stix", "sigma", "ldap", "cloud_audit", "edr",
-    "vulnerability", "identity", "compliance", "incident", "email", "other",
+    "evtx",
+    "sysmon",
+    "netflow",
+    "dns",
+    "http",
+    "stix",
+    "sigma",
+    "ldap",
+    "cloud_audit",
+    "edr",
+    "vulnerability",
+    "identity",
+    "compliance",
+    "incident",
+    "email",
+    "other",
 ]
 assert len(SOURCE_TYPES) == 16
 

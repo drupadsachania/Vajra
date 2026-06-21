@@ -6,20 +6,34 @@ are treated as single atomic IDs (never split by BPE sub-word rules).
 
 from __future__ import annotations
 
+from typing import Sequence
+
 import torch
 import torch.nn as nn
-from typing import Sequence
 
 from vajra.config import VajraConfig
 
 _SENTINEL_TOKENS: tuple[str, ...] = (
-    "<|S_START|>", "<|S_END|>", "<|S_KEY|>", "<|S_VAL|>",
-    "<|S_ARR|>", "<|S_NULL|>",
-    "<|S_DOMAIN:detection|>", "<|S_DOMAIN:forensics|>", "<|S_DOMAIN:cti|>",
-    "<|S_DOMAIN:vuln|>", "<|S_DOMAIN:identity|>", "<|S_DOMAIN:ir|>",
+    "<|S_START|>",
+    "<|S_END|>",
+    "<|S_KEY|>",
+    "<|S_VAL|>",
+    "<|S_ARR|>",
+    "<|S_NULL|>",
+    "<|S_DOMAIN:detection|>",
+    "<|S_DOMAIN:forensics|>",
+    "<|S_DOMAIN:cti|>",
+    "<|S_DOMAIN:vuln|>",
+    "<|S_DOMAIN:identity|>",
+    "<|S_DOMAIN:ir|>",
     "<|S_DOMAIN:compliance|>",
-    "<|S_EVTX|>", "<|S_STIX|>", "<|S_SIGMA|>", "<|S_CLOUD|>", "<|S_LDAP|>",
-    "<|S_BASELINE|>", "<|S_OBSERVED|>",
+    "<|S_EVTX|>",
+    "<|S_STIX|>",
+    "<|S_SIGMA|>",
+    "<|S_CLOUD|>",
+    "<|S_LDAP|>",
+    "<|S_BASELINE|>",
+    "<|S_OBSERVED|>",
 )
 
 
@@ -41,6 +55,7 @@ class SentinelTokenizer:
 
         if hf_model_name is not None:
             from tokenizers import Tokenizer
+
             self._tok = Tokenizer.from_pretrained(hf_model_name)
             # Add sentinels as guaranteed-atomic special tokens
             self._tok.add_special_tokens(list(_SENTINEL_TOKENS))

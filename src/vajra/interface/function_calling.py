@@ -4,6 +4,7 @@ Native tool vocabulary (6 tools). Tool names masked at logit level — any
 decoder output containing an unknown tool name is silently discarded.
 Max 8 agentic turns per request; stateless protocol.
 """
+
 from __future__ import annotations
 
 import json
@@ -11,14 +12,16 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-NATIVE_TOOLS = frozenset({
-    "lookup_cve",
-    "lookup_technique",
-    "query_asset_graph",
-    "lookup_ioc",
-    "get_sigma_rule",
-    "lookup_d3fend",
-})
+NATIVE_TOOLS = frozenset(
+    {
+        "lookup_cve",
+        "lookup_technique",
+        "query_asset_graph",
+        "lookup_ioc",
+        "get_sigma_rule",
+        "lookup_d3fend",
+    }
+)
 
 MAX_AGENTIC_TURNS = 8
 
@@ -35,7 +38,7 @@ def _extract_json_objects(text: str) -> list[str]:
     objects = []
     i = 0
     while i < len(text):
-        if text[i] == '{':
+        if text[i] == "{":
             depth = 0
             start = i
             in_string = False
@@ -45,7 +48,7 @@ def _extract_json_objects(text: str) -> list[str]:
                 if escape:
                     escape = False
                     continue
-                if ch == '\\' and in_string:
+                if ch == "\\" and in_string:
                     escape = True
                     continue
                 if ch == '"':
@@ -53,12 +56,12 @@ def _extract_json_objects(text: str) -> list[str]:
                     continue
                 if in_string:
                     continue
-                if ch == '{':
+                if ch == "{":
                     depth += 1
-                elif ch == '}':
+                elif ch == "}":
                     depth -= 1
                     if depth == 0:
-                        objects.append(text[start:j + 1])
+                        objects.append(text[start : j + 1])
                         i = j + 1
                         break
             else:
@@ -98,10 +101,12 @@ def parse_tool_calls(decoder_output: str, turn: int = 0) -> list[ToolCall]:
             # Unknown tool — masked/rejected per §10.6
             continue
 
-        results.append(ToolCall(
-            tool_name=tool_name,
-            parameters=obj.get("parameters", {}),
-            call_id=obj.get("call_id"),
-        ))
+        results.append(
+            ToolCall(
+                tool_name=tool_name,
+                parameters=obj.get("parameters", {}),
+                call_id=obj.get("call_id"),
+            )
+        )
 
     return results

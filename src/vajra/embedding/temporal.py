@@ -8,6 +8,7 @@ Null timestamps resolve to a single learned fallback vector.
 from __future__ import annotations
 
 import math
+
 import torch
 import torch.nn as nn
 
@@ -48,9 +49,7 @@ class ContiFormerEncoding(nn.Module):
         super().__init__()
         # Log-uniform initialization over [10⁻⁷, 10³]
         log_min, log_max = math.log(1e-7), math.log(1e3)
-        freqs = torch.exp(
-            torch.linspace(log_min, log_max, self.FREQ_PAIRS)
-        )
+        freqs = torch.exp(torch.linspace(log_min, log_max, self.FREQ_PAIRS))
         self.log_freqs = nn.Parameter(torch.log(freqs))  # learnable in log-space
 
         self.proj = nn.Sequential(
@@ -71,8 +70,8 @@ class ContiFormerEncoding(nn.Module):
         Unix-epoch seconds (~1.7e9) × ω up to 1e3 ≈ 1e12, which exceeds
         float32's ~7 significant digits, making cos/sin pure noise otherwise.
         """
-        w = self.freqs.double()              # (128,)
-        wt = t.double().unsqueeze(-1) * w   # (batch, seq, 128)
+        w = self.freqs.double()  # (128,)
+        wt = t.double().unsqueeze(-1) * w  # (batch, seq, 128)
         out = torch.cat([wt.cos(), wt.sin()], dim=-1)  # (batch, seq, 256)
         return out.to(t.dtype if t.is_floating_point() else torch.float32)
 
@@ -90,6 +89,6 @@ class ContiFormerEncoding(nn.Module):
             # Null path: broadcast learned null vector
             return self.null_vector.expand(batch, seq, -1)
 
-        phi = self.phi(timestamps)           # (batch, seq, 256)
-        h = self.proj(phi)                   # (batch, seq, d_model)
+        phi = self.phi(timestamps)  # (batch, seq, 256)
+        h = self.proj(phi)  # (batch, seq, d_model)
         return self.grn(h)

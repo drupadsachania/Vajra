@@ -9,6 +9,7 @@ Draft k=4 tokens per step; primary verifies in single forward pass.
 from __future__ import annotations
 
 import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -22,7 +23,7 @@ class _MTPDecoderBlock(nn.Module):
     def __init__(self, d_model: int, n_heads: int, ffn_width: int):
         super().__init__()
         assert d_model % n_heads == 0
-        self.n_heads  = n_heads
+        self.n_heads = n_heads
         self.head_dim = d_model // n_heads
 
         self.ln1 = nn.LayerNorm(d_model)
@@ -84,12 +85,14 @@ class MTPDrafter(nn.Module):
         # Project from primary d_model → drafter d_model
         self.input_proj = nn.Linear(d_model_primary, d_model_drafter, bias=False)
 
-        self.blocks = nn.ModuleList([
-            _MTPDecoderBlock(d_model_drafter, n_heads, d_model_drafter * 4)
-            for _ in range(2)
-        ])
+        self.blocks = nn.ModuleList(
+            [
+                _MTPDecoderBlock(d_model_drafter, n_heads, d_model_drafter * 4)
+                for _ in range(2)
+            ]
+        )
         self.final_ln = nn.LayerNorm(d_model_drafter)
-        self.lm_head  = nn.Linear(d_model_drafter, vocab_size, bias=False)
+        self.lm_head = nn.Linear(d_model_drafter, vocab_size, bias=False)
 
     def draft(
         self,
@@ -104,15 +107,15 @@ class MTPDrafter(nn.Module):
         k = k or self.DRAFT_STEPS
         ids = context_ids.clone()
         for _ in range(k):
-            emb = self.token_embed(ids)               # (1, len, d_primary)
-            x   = self.input_proj(emb)                # (1, len, d_drafter)
+            emb = self.token_embed(ids)  # (1, len, d_primary)
+            x = self.input_proj(emb)  # (1, len, d_drafter)
             for block in self.blocks:
                 x = block(x)
             x = self.final_ln(x)
-            logits = self.lm_head(x[:, -1, :])        # (1, vocab)
+            logits = self.lm_head(x[:, -1, :])  # (1, vocab)
             next_tok = logits.argmax(dim=-1, keepdim=True)  # (1, 1)
             ids = torch.cat([ids, next_tok], dim=1)
-        return ids[:, context_ids.shape[1]:]          # (1, k) only new tokens
+        return ids[:, context_ids.shape[1] :]  # (1, k) only new tokens
 
     def verify(
         self,
@@ -126,7 +129,7 @@ class MTPDrafter(nn.Module):
 
         Returns accepted token IDs (may be shorter than k).
         """
-        primary_preds = primary_logits.argmax(dim=-1)   # (1, k)
+        primary_preds = primary_logits.argmax(dim=-1)  # (1, k)
         accepted = []
         for i in range(draft_ids.shape[1]):
             if draft_ids[0, i] == primary_preds[0, i]:
@@ -138,4 +141,4 @@ class MTPDrafter(nn.Module):
         if not accepted:
             return torch.empty(1, 0, dtype=torch.long, device=draft_ids.device)
         # Each element is shape (1,); concat → (accepted_len,), then add batch dim → (1, accepted_len)
-        return torch.cat(accepted).unsqueeze(0)   # (1, accepted_len)
+        return torch.cat(accepted).unsqueeze(0)  # (1, accepted_len)
