@@ -4,17 +4,17 @@ import pytest
 import torch
 
 from vajra.config import VajraConfig
-from vajra.embedding.source_type import SourceTypeEmbedding, SOURCE_TYPES
-from vajra.embedding.temporal import ContiFormerEncoding
-from vajra.embedding.ontology import OntologyEmbedding
 from vajra.embedding.embedding_layer import EmbeddingLayer
-
+from vajra.embedding.ontology import OntologyEmbedding
+from vajra.embedding.source_type import SOURCE_TYPES, SourceTypeEmbedding
+from vajra.embedding.temporal import ContiFormerEncoding
 
 CFG = VajraConfig()
 D = CFG.shared_d_model  # 1024
 
 
 # ── Source-type embeddings ────────────────────────────────────────────────────
+
 
 class TestSourceTypeEmbedding:
 
@@ -37,6 +37,7 @@ class TestSourceTypeEmbedding:
 
 
 # ── ContiFormer temporal encoding ─────────────────────────────────────────────
+
 
 class TestContiFormerEncoding:
 
@@ -64,8 +65,8 @@ class TestContiFormerEncoding:
     def test_freq_init_log_uniform_range(self):
         enc = ContiFormerEncoding(d_model=D)
         freqs = enc.freqs.detach()
-        assert freqs.min().item() >= 1e-8    # allow small numerical slack
-        assert freqs.max().item() <= 1e4     # log-uniform up to 1e3
+        assert freqs.min().item() >= 1e-8  # allow small numerical slack
+        assert freqs.max().item() <= 1e4  # log-uniform up to 1e3
 
     def test_null_returns_learned_vector(self):
         enc = ContiFormerEncoding(d_model=D)
@@ -81,6 +82,7 @@ class TestContiFormerEncoding:
 
 
 # ── OntologyEmbedding ─────────────────────────────────────────────────────────
+
 
 class TestOntologyEmbedding:
 
@@ -107,13 +109,14 @@ class TestOntologyEmbedding:
 
 # ── EmbeddingLayer (full integration) ────────────────────────────────────────
 
+
 class TestEmbeddingLayer:
 
     def test_basic_shape(self):
         layer = EmbeddingLayer(CFG)
         B, S = 2, 64
         input_ids = torch.randint(0, CFG.embedding.vocabulary_size, (B, S))
-        src_ids   = torch.randint(0, 16, (B, S))
+        src_ids = torch.randint(0, 16, (B, S))
         out = layer(input_ids, src_ids)
         assert out.shape == (B, S, D)
 
@@ -121,8 +124,8 @@ class TestEmbeddingLayer:
         layer = EmbeddingLayer(CFG)
         B, S = 2, 64
         input_ids = torch.randint(0, CFG.embedding.vocabulary_size, (B, S))
-        src_ids   = torch.randint(0, 16, (B, S))
-        ts        = torch.rand(B, S) * 1e9
+        src_ids = torch.randint(0, 16, (B, S))
+        ts = torch.rand(B, S) * 1e9
         out = layer(input_ids, src_ids, timestamps=ts)
         assert out.shape == (B, S, D)
 
@@ -130,7 +133,7 @@ class TestEmbeddingLayer:
         layer = EmbeddingLayer(CFG)
         B, S = 2, 64
         input_ids = torch.randint(0, CFG.embedding.vocabulary_size, (B, S))
-        src_ids   = torch.randint(0, 16, (B, S))
+        src_ids = torch.randint(0, 16, (B, S))
         out = layer(input_ids, src_ids, timestamps=None)
         assert out.shape == (B, S, D)
 
@@ -139,7 +142,7 @@ class TestEmbeddingLayer:
         layer = EmbeddingLayer(CFG)
         B, S = 1, 16
         input_ids = torch.randint(0, CFG.embedding.vocabulary_size, (B, S))
-        src_ids   = torch.zeros(B, S, dtype=torch.long)
+        src_ids = torch.zeros(B, S, dtype=torch.long)
         out = layer(input_ids, src_ids)
         # LayerNorm mean ≈ 0, std ≈ 1 across d_model dimension
         mean = out.mean(dim=-1).abs().max().item()
@@ -149,7 +152,7 @@ class TestEmbeddingLayer:
         layer = EmbeddingLayer(CFG)
         B, S = 1, 8
         input_ids = torch.randint(0, CFG.embedding.vocabulary_size, (B, S))
-        src_ids   = torch.zeros(B, S, dtype=torch.long)
+        src_ids = torch.zeros(B, S, dtype=torch.long)
         ts = torch.rand(B, S) * 1e6
         out = layer(input_ids, src_ids, timestamps=ts)
         out.sum().backward()

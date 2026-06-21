@@ -10,9 +10,10 @@ import torch
 import torch.nn as nn
 
 from vajra.config import VajraConfig
+
+from .ontology import OntologyEmbedding
 from .source_type import SourceTypeEmbedding
 from .temporal import ContiFormerEncoding
-from .ontology import OntologyEmbedding
 
 
 class EmbeddingLayer(nn.Module):
@@ -51,10 +52,10 @@ class EmbeddingLayer(nn.Module):
         """
         batch, seq = input_ids.shape
 
-        e_token = self.token_embed(input_ids)                            # (B, S, d)
-        e_src   = self.source_type(source_type_ids)                      # (B, S, d)
-        e_temp  = self.temporal(timestamps, batch, seq)                  # (B, S, d)
-        e_ont   = self.ontology(node_ids, adj, batch, seq)               # (B, S, d)
+        e_token = self.token_embed(input_ids)  # (B, S, d)
+        e_src = self.source_type(source_type_ids)  # (B, S, d)
+        e_temp = self.temporal(timestamps, batch, seq)  # (B, S, d)
+        e_ont = self.ontology(node_ids, adj, batch, seq)  # (B, S, d)
 
         combined = e_token + e_src + e_temp + e_ont
         return self.layer_norm(combined)

@@ -4,6 +4,45 @@ The highest-value contribution right now is **labeled training data**, especiall
 
 ---
 
+## Branch Strategy
+
+| Branch | Purpose | Who pushes |
+|--------|---------|-----------|
+| `main` | Validated, tested code — **protected, no direct pushes** | Nobody directly; merges only via approved PR |
+| `claude/new-session-*` | AI-assisted feature work | Claude Code sessions |
+| `feature/<name>` | Human contributor feature work | Collaborators |
+| `fix/<name>` | Bug / hotfix branches | Collaborators |
+
+**Rule:** Every change to `main` goes through a pull request, even trivial ones. This ensures 213+ tests pass and `validate_requirements.py --impl impl_config.json` stays clean before anything lands on `main`.
+
+### Typical workflow for a collaborator
+
+```bash
+git checkout main && git pull origin main
+git checkout -b feature/your-feature-name
+# ... do work ...
+git push -u origin feature/your-feature-name
+# Open PR: feature/your-feature-name → main
+```
+
+### Typical workflow for a Claude Code session
+
+Each new Claude Code session gets its own `claude/new-session-<id>` branch. When a session's work is reviewed and ready:
+
+1. Open a PR from `claude/new-session-<id>` → `main`
+2. Human reviews the diff
+3. Merge (squash or merge commit — either is fine)
+
+### Resolving conflicts between simultaneous contributors
+
+If two branches have conflicting changes:
+1. Rebase your branch on the latest `main`: `git rebase origin/main`
+2. Resolve conflicts locally
+3. Force-push your branch: `git push --force-with-lease origin <your-branch>`
+4. Re-request review
+
+---
+
 ## What to Contribute
 
 A contribution is a single JSON file conforming to the training example schema at `data/schema/training_example.schema.json`.

@@ -1,21 +1,23 @@
 """Tests for Chunk 9: end-to-end inference pipeline + ONNX export."""
+
 import os
 import tempfile
+
 import pytest
 import torch
 import torch.nn as nn
 
 from vajra.config import VajraConfig
-from vajra.interface.types import (
-    VajraInferenceRequest, VajraInferenceResponse, SecurityEvent,
-    EvidenceDAG, AFNScore,
-)
-from vajra.interface.pipeline import VajraInferencePipeline
-from vajra.interface.function_calling import parse_tool_calls, NATIVE_TOOLS, ToolCall
-from vajra.interface.onnx_export import export_encoder_fusion, export_decoder
 from vajra.decoder.decoder import ConstrainedDecoder
 from vajra.fusion.epistemic_fusion import EpistemicFusionLayer
 from vajra.heads.decision_head import apply_dcat_override
+from vajra.interface.function_calling import (NATIVE_TOOLS, ToolCall,
+                                              parse_tool_calls)
+from vajra.interface.onnx_export import export_decoder, export_encoder_fusion
+from vajra.interface.pipeline import VajraInferencePipeline
+from vajra.interface.types import (AFNScore, EvidenceDAG, SecurityEvent,
+                                   VajraInferenceRequest,
+                                   VajraInferenceResponse)
 
 
 @pytest.fixture(scope="module")
@@ -33,12 +35,24 @@ def pipeline(cfg):
 
 def _make_request(n_events=3, justification=False, request_id="test-001"):
     events = [
-        SecurityEvent(event_type="evtx", domain="detection_network",
-                      data={"EventID": 4624}, timestamp=1700000000.0),
-        SecurityEvent(event_type="netflow", domain="detection_network",
-                      data={"src_port": 443}, timestamp=1700000001.0),
-        SecurityEvent(event_type="stix", domain="cti_stix",
-                      data={"type": "indicator"}, timestamp=1700000002.0),
+        SecurityEvent(
+            event_type="evtx",
+            domain="detection_network",
+            data={"EventID": 4624},
+            timestamp=1700000000.0,
+        ),
+        SecurityEvent(
+            event_type="netflow",
+            domain="detection_network",
+            data={"src_port": 443},
+            timestamp=1700000001.0,
+        ),
+        SecurityEvent(
+            event_type="stix",
+            domain="cti_stix",
+            data={"type": "indicator"},
+            timestamp=1700000002.0,
+        ),
     ][:n_events]
     return VajraInferenceRequest(
         request_id=request_id,
@@ -101,8 +115,12 @@ class TestEndToEnd:
 # ---------------------------------------------------------------------------
 class TestContentSensitivity:
     def _req(self, request_id, event_id):
-        ev = SecurityEvent(event_type="evtx", domain="detection_network",
-                           data={"EventID": event_id}, timestamp=1700000000.0)
+        ev = SecurityEvent(
+            event_type="evtx",
+            domain="detection_network",
+            data={"EventID": event_id},
+            timestamp=1700000000.0,
+        )
         return VajraInferenceRequest(request_id=request_id, events=[ev])
 
     def test_same_content_same_output(self, pipeline):
@@ -113,8 +131,9 @@ class TestContentSensitivity:
     def test_different_content_different_output(self, pipeline):
         a = pipeline.run(self._req("a", 4624))
         b = pipeline.run(self._req("b", 1102))
-        assert a.decision_probabilities != b.decision_probabilities, \
-            "Different event content produced identical output — run() ignores content"
+        assert (
+            a.decision_probabilities != b.decision_probabilities
+        ), "Different event content produced identical output — run() ignores content"
 
     def test_full_pipeline_run_guarded(self, cfg):
         """Full (non-tiny) run() must fail loudly, not return placeholder output."""
@@ -188,16 +207,20 @@ class TestDCATOverride:
 
         with torch.no_grad():
             # F3 uniform → no early exit; F6 → class 2 (DEFER)
-            pipe.fusion.f3_head.weight.zero_(); pipe.fusion.f3_head.bias.zero_()
-            pipe.fusion.f6_head.weight.zero_(); pipe.fusion.f6_head.bias.zero_()
+            pipe.fusion.f3_head.weight.zero_()
+            pipe.fusion.f3_head.bias.zero_()
+            pipe.fusion.f6_head.weight.zero_()
+            pipe.fusion.f6_head.bias.zero_()
             pipe.fusion.f6_head.bias[2] = 20.0
 
         # Inject high divergence on a DCAT-bearing encoder + low threshold
-        pipe.domain_encoders["detection_network"].last_dcat_divergence = torch.tensor([[5.0]])
+        pipe.domain_encoders["detection_network"].last_dcat_divergence = torch.tensor(
+            [[5.0]]
+        )
         pipe.cfg.dcat.theta_divergence = 1.0
 
         resp = pipe.run(_make_request())
-        assert resp.decision_class == 1     # DEFER (2) escalated to ESCALATE (1)
+        assert resp.decision_class == 1  # DEFER (2) escalated to ESCALATE (1)
         assert resp.dcat_override is True
 
     def test_pipeline_no_override_when_divergence_low(self, cfg):
@@ -205,13 +228,17 @@ class TestDCATOverride:
         pipe = VajraInferencePipeline(cfg=cfg, tiny=True)
         pipe.eval()
         with torch.no_grad():
-            pipe.fusion.f3_head.weight.zero_(); pipe.fusion.f3_head.bias.zero_()
-            pipe.fusion.f6_head.weight.zero_(); pipe.fusion.f6_head.bias.zero_()
+            pipe.fusion.f3_head.weight.zero_()
+            pipe.fusion.f3_head.bias.zero_()
+            pipe.fusion.f6_head.weight.zero_()
+            pipe.fusion.f6_head.bias.zero_()
             pipe.fusion.f6_head.bias[2] = 20.0
-        pipe.domain_encoders["detection_network"].last_dcat_divergence = torch.tensor([[0.1]])
+        pipe.domain_encoders["detection_network"].last_dcat_divergence = torch.tensor(
+            [[0.1]]
+        )
         pipe.cfg.dcat.theta_divergence = 1.0
         resp = pipe.run(_make_request())
-        assert resp.decision_class == 2     # stays DEFER
+        assert resp.decision_class == 2  # stays DEFER
         assert resp.dcat_override is False
 
 
@@ -249,11 +276,11 @@ class TestFunctionCalling:
 
     def test_multiple_calls_in_text(self):
         text = (
-            'prefix '
+            "prefix "
             '{"type": "tool_call", "tool_name": "lookup_cve", "parameters": {"id": "1"}} '
-            'middle '
+            "middle "
             '{"type": "tool_call", "tool_name": "lookup_ioc", "parameters": {"hash": "abc"}} '
-            'suffix'
+            "suffix"
         )
         calls = parse_tool_calls(text)
         assert len(calls) == 2
@@ -262,6 +289,7 @@ class TestFunctionCalling:
 
     def test_max_agentic_turns_enforced(self):
         from vajra.interface.function_calling import MAX_AGENTIC_TURNS
+
         text = '{"type": "tool_call", "tool_name": "lookup_cve", "parameters": {}}'
         # Within budget → parsed
         assert len(parse_tool_calls(text, turn=MAX_AGENTIC_TURNS - 1)) == 1
@@ -279,19 +307,28 @@ class TestONNXExport:
         import onnxruntime as ort
 
         decoder = ConstrainedDecoder(
-            vocab_size=50428, d_model=64, n_heads=4, n_layers=2,
-            ffn_width=128, dropout=0.0,
+            vocab_size=50428,
+            d_model=64,
+            n_heads=4,
+            n_layers=2,
+            ffn_width=128,
+            dropout=0.0,
         )
         decoder.eval()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             path = os.path.join(tmpdir, "vajra_decoder.onnx")
             export_decoder(
-                decoder, path=path,
-                vocab_size=50428, afn_top_k=16, d_model=64, tgt_len=4,
+                decoder,
+                path=path,
+                vocab_size=50428,
+                afn_top_k=16,
+                d_model=64,
+                tgt_len=4,
             )
             sess = ort.InferenceSession(path)
             import numpy as np
+
             ids_np = np.random.randint(0, 100, (1, 4)).astype(np.int64)
             enc_np = np.random.randn(1, 16, 64).astype(np.float32)
             out = sess.run(None, {"input_ids": ids_np, "afn_encoder_states": enc_np})
@@ -303,9 +340,11 @@ class TestONNXExport:
 
         class _FusionWrapper(nn.Module):
             """Thin wrapper so fusion returns just logits (ONNX-friendly)."""
+
             def __init__(self, fusion):
                 super().__init__()
                 self.fusion = fusion
+
             def forward(self, x):
                 result = self.fusion(x)
                 return result.decision_logits
@@ -319,6 +358,7 @@ class TestONNXExport:
             export_encoder_fusion(wrapper, path=path, d_model=1024, n_domains=7)
             sess = ort.InferenceSession(path)
             import numpy as np
+
             x_np = np.random.randn(1, 7, 1024).astype(np.float32)
             out = sess.run(None, {"domain_cls_tokens": x_np})
             assert out[0].shape == (1, 4)
@@ -326,18 +366,23 @@ class TestONNXExport:
     def test_decoder_onnx_honors_dynamic_seq_len(self):
         """Exported decoder must run at a seq_len different from the trace length."""
         pytest.importorskip("onnxruntime")
-        import onnxruntime as ort
         import numpy as np
+        import onnxruntime as ort
 
         decoder = ConstrainedDecoder(
-            vocab_size=1000, d_model=64, n_heads=4, n_layers=2,
-            ffn_width=128, dropout=0.0,
+            vocab_size=1000,
+            d_model=64,
+            n_heads=4,
+            n_layers=2,
+            ffn_width=128,
+            dropout=0.0,
         )
         decoder.eval()
         with tempfile.TemporaryDirectory() as tmpdir:
             path = os.path.join(tmpdir, "dec.onnx")
-            export_decoder(decoder, path=path, vocab_size=1000,
-                           afn_top_k=16, d_model=64, tgt_len=4)  # trace at 4
+            export_decoder(
+                decoder, path=path, vocab_size=1000, afn_top_k=16, d_model=64, tgt_len=4
+            )  # trace at 4
             sess = ort.InferenceSession(path)
             for L in (1, 8, 16):  # all ≠ trace length
                 ids = np.random.randint(0, 100, (1, L)).astype(np.int64)
@@ -348,8 +393,9 @@ class TestONNXExport:
     def test_fusion_onnx_honors_dynamic_batch(self, cfg):
         """Exported fusion (via FusionExportWrapper) must run at varying batch sizes."""
         pytest.importorskip("onnxruntime")
-        import onnxruntime as ort
         import numpy as np
+        import onnxruntime as ort
+
         from vajra.interface.onnx_export import FusionExportWrapper
 
         fusion = EpistemicFusionLayer(cfg)
@@ -357,7 +403,9 @@ class TestONNXExport:
         wrapper = FusionExportWrapper(fusion)
         with tempfile.TemporaryDirectory() as tmpdir:
             path = os.path.join(tmpdir, "fus.onnx")
-            export_encoder_fusion(wrapper, path=path, d_model=1024, n_domains=7)  # trace batch=1
+            export_encoder_fusion(
+                wrapper, path=path, d_model=1024, n_domains=7
+            )  # trace batch=1
             sess = ort.InferenceSession(path)
             for B in (2, 4):  # ≠ trace batch
                 x_np = np.random.randn(B, 7, 1024).astype(np.float32)

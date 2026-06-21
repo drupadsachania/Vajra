@@ -5,6 +5,7 @@ inference-time GCN for consuming-system RAG-provided graphs).
 from __future__ import annotations
 
 import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -20,27 +21,37 @@ class TransERotatELayer(nn.Module):
     def __init__(self, num_entities: int, num_relations: int, d_kg: int = 256):
         super().__init__()
         self.d_kg = d_kg
-        self.entity_emb  = nn.Embedding(num_entities, d_kg)
+        self.entity_emb = nn.Embedding(num_entities, d_kg)
         self.relation_emb = nn.Embedding(num_relations, d_kg)
         self._init_weights()
 
     def _init_weights(self):
-        nn.init.uniform_(self.entity_emb.weight,  -6 / math.sqrt(self.d_kg), 6 / math.sqrt(self.d_kg))
-        nn.init.uniform_(self.relation_emb.weight, -6 / math.sqrt(self.d_kg), 6 / math.sqrt(self.d_kg))
+        nn.init.uniform_(
+            self.entity_emb.weight, -6 / math.sqrt(self.d_kg), 6 / math.sqrt(self.d_kg)
+        )
+        nn.init.uniform_(
+            self.relation_emb.weight,
+            -6 / math.sqrt(self.d_kg),
+            6 / math.sqrt(self.d_kg),
+        )
         # RotatE requires each complex element (re_j, im_j) to have unit modulus,
         # not the whole vector to have unit L2 norm. Normalize per (re, im) pair.
         with torch.no_grad():
             w = self.relation_emb.weight.data
             d = self.d_kg // 2
             re, im = w[:, :d], w[:, d:]
-            mod = (re ** 2 + im ** 2).sqrt().clamp_min(1e-9)
+            mod = (re**2 + im**2).sqrt().clamp_min(1e-9)
             self.relation_emb.weight.data = torch.cat([re / mod, im / mod], dim=-1)
 
-    def transe_score(self, h: torch.Tensor, r: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def transe_score(
+        self, h: torch.Tensor, r: torch.Tensor, t: torch.Tensor
+    ) -> torch.Tensor:
         """||h + r - t||₂ (lower = more plausible)."""
         return (h + r - t).norm(dim=-1)
 
-    def rotate_score(self, h: torch.Tensor, r: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
+    def rotate_score(
+        self, h: torch.Tensor, r: torch.Tensor, t: torch.Tensor
+    ) -> torch.Tensor:
         """||h ∘ r - t||₂ in complex space (d_kg must be even)."""
         d = self.d_kg // 2
         h_re, h_im = h[..., :d], h[..., d:]
@@ -98,10 +109,10 @@ class MitreKGEmbedding(nn.Module):
         adj        : (N, N) normalized adjacency
         Returns    : (N, d_model)
         """
-        x = self.kge.entity_emb(entity_ids)   # (N, d_kg)
+        x = self.kge.entity_emb(entity_ids)  # (N, d_kg)
         x = self.gcn1(x, adj)
         x = self.gcn2(x, adj)
-        return self.proj(x)                    # (N, d_model)
+        return self.proj(x)  # (N, d_model)
 
     def freeze(self):
         for p in self.parameters():
@@ -132,7 +143,7 @@ class InferenceGCN(nn.Module):
         # normalized adjacency (rows summing to ~1) would collapse every degree
         # to 0/1 after .long() truncation, making the Graphormer feature useless.
         degrees = (adj > 0).sum(dim=-1).clamp(max=self.DEGREE_BINS)  # (N,)
-        return self.degree_emb(degrees)                              # (N, 32)
+        return self.degree_emb(degrees)  # (N, 32)
 
     def forward(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
         """
@@ -141,7 +152,7 @@ class InferenceGCN(nn.Module):
         Returns: (N, d_model)
         """
         deg_feat = self._degree_features(adj)
-        x = torch.cat([x, deg_feat], dim=-1)   # (N, d_graph+32)
+        x = torch.cat([x, deg_feat], dim=-1)  # (N, d_graph+32)
         x = self.gcn1(x, adj)
         x = self.gcn2(x, adj)
         return x

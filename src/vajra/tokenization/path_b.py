@@ -7,9 +7,10 @@ projection to d_model=1024.
 from __future__ import annotations
 
 import ipaddress
+from dataclasses import dataclass
+
 import torch
 import torch.nn as nn
-from dataclasses import dataclass
 
 
 @dataclass
@@ -18,14 +19,14 @@ class NetFlowRecord:
     dst_ip: str
     src_port: int
     dst_port: int
-    protocol: int       # e.g. 6=TCP, 17=UDP
+    protocol: int  # e.g. 6=TCP, 17=UDP
     bytes_sent: int
     packets: int
     duration_ms: float
 
 
 _RFC1918_BLOCKS = [
-    ("10.0.0.0",   8),
+    ("10.0.0.0", 8),
     ("172.16.0.0", 12),
     ("192.168.0.0", 16),
 ]
@@ -49,10 +50,10 @@ def _ip_to_tensor(ip_str: str) -> torch.Tensor:
         addr = ipaddress.ip_address(ip_str)
         octets = list(addr.packed)
         if _is_rfc1918(ip_str) and len(octets) == 4:
-            slash24_index = octets[2]   # 3rd octet identifies the /24
+            slash24_index = octets[2]  # 3rd octet identifies the /24
             vec[slash24_index] = 1.0
         else:
-            vec[256] = 1.0              # external indicator
+            vec[256] = 1.0  # external indicator
     except ValueError:
         vec[256] = 1.0
     return vec
@@ -71,14 +72,14 @@ class CvssEncoder(nn.Module):
 
     # Metric → number of possible values
     _METRICS = {
-        "AV": ["N", "A", "L", "P"],       # 4
-        "AC": ["L", "H"],                  # 2
-        "PR": ["N", "L", "H"],             # 3
-        "UI": ["N", "R"],                  # 2
-        "S":  ["U", "C"],                  # 2
-        "C":  ["N", "L", "H"],             # 3
-        "I":  ["N", "L", "H"],             # 3
-        "A":  ["N", "L", "H"],             # 3
+        "AV": ["N", "A", "L", "P"],  # 4
+        "AC": ["L", "H"],  # 2
+        "PR": ["N", "L", "H"],  # 3
+        "UI": ["N", "R"],  # 2
+        "S": ["U", "C"],  # 2
+        "C": ["N", "L", "H"],  # 3
+        "I": ["N", "L", "H"],  # 3
+        "A": ["N", "L", "H"],  # 3
         # Slot 22-24: severity bucket (None/Low/Med/High/Crit → capped to 3 bits)
     }
     # AV(4)+AC(2)+PR(3)+UI(2)+S(2)+C(3)+I(3)+A(3) = 22; remaining 3 = severity
@@ -145,8 +146,7 @@ class IpEncoder(nn.Module):
 
 
 _RFC1918_NETWORKS = [
-    ipaddress.ip_network(f"{b}/{p}", strict=False)
-    for b, p in _RFC1918_BLOCKS
+    ipaddress.ip_network(f"{b}/{p}", strict=False) for b, p in _RFC1918_BLOCKS
 ]
 
 
@@ -167,10 +167,10 @@ class NetFlowEncoder(nn.Module):
         self.ip_enc = IpEncoder(d_model)
         self.port_embed = nn.Embedding(self.PORT_VOCAB, self.PORT_DIM)
         self.port_proj = nn.Linear(self.PORT_DIM, d_model)
-        self.proto_proj = nn.Linear(256, d_model)   # protocol 0-255 one-hot
+        self.proto_proj = nn.Linear(256, d_model)  # protocol 0-255 one-hot
         # Separate projections for each scalar so the model can distinguish them.
-        self.bytes_proj    = nn.Linear(1, d_model)
-        self.packets_proj  = nn.Linear(1, d_model)
+        self.bytes_proj = nn.Linear(1, d_model)
+        self.packets_proj = nn.Linear(1, d_model)
         self.duration_proj = nn.Linear(1, d_model)
 
     def encode_record(self, rec: NetFlowRecord) -> dict[str, torch.Tensor]:
@@ -186,19 +186,19 @@ class NetFlowEncoder(nn.Module):
         proto_t[0, min(rec.protocol, 255)] = 1.0
 
         # log1p prevents gradient/activation blow-up on large byte counts.
-        bytes_t    = torch.tensor([[float(rec.bytes_sent)]], device=device).log1p()
-        packets_t  = torch.tensor([[float(rec.packets)]], device=device).log1p()
+        bytes_t = torch.tensor([[float(rec.bytes_sent)]], device=device).log1p()
+        packets_t = torch.tensor([[float(rec.packets)]], device=device).log1p()
         duration_t = torch.tensor([[float(rec.duration_ms)]], device=device).log1p()
 
         return {
-            "src_ip":    self.ip_enc(src_ip_t),
-            "dst_ip":    self.ip_enc(dst_ip_t),
-            "src_port":  self.port_proj(self.port_embed(src_port_t)),
-            "dst_port":  self.port_proj(self.port_embed(dst_port_t)),
-            "protocol":  self.proto_proj(proto_t),
-            "bytes":     self.bytes_proj(bytes_t),
-            "packets":   self.packets_proj(packets_t),
-            "duration":  self.duration_proj(duration_t),
+            "src_ip": self.ip_enc(src_ip_t),
+            "dst_ip": self.ip_enc(dst_ip_t),
+            "src_port": self.port_proj(self.port_embed(src_port_t)),
+            "dst_port": self.port_proj(self.port_embed(dst_port_t)),
+            "protocol": self.proto_proj(proto_t),
+            "bytes": self.bytes_proj(bytes_t),
+            "packets": self.packets_proj(packets_t),
+            "duration": self.duration_proj(duration_t),
         }
 
     def forward(self, rec: NetFlowRecord) -> torch.Tensor:

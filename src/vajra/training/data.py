@@ -13,7 +13,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterator
 
-
 DOMAIN_TAG_MAP = {
     "detection_network": 0,
     "forensics_provenance": 1,
@@ -44,16 +43,16 @@ _ALLOWED_IPv4_NETWORKS = [
     ipaddress.ip_network("10.0.0.0/8"),
     ipaddress.ip_network("172.16.0.0/12"),
     ipaddress.ip_network("192.168.0.0/16"),
-    ipaddress.ip_network("192.0.2.0/24"),     # RFC5737 TEST-NET-1
+    ipaddress.ip_network("192.0.2.0/24"),  # RFC5737 TEST-NET-1
     ipaddress.ip_network("198.51.100.0/24"),  # RFC5737 TEST-NET-2
-    ipaddress.ip_network("203.0.113.0/24"),   # RFC5737 TEST-NET-3
-    ipaddress.ip_network("127.0.0.0/8"),      # loopback
-    ipaddress.ip_network("0.0.0.0/32"),       # unspecified
+    ipaddress.ip_network("203.0.113.0/24"),  # RFC5737 TEST-NET-3
+    ipaddress.ip_network("127.0.0.0/8"),  # loopback
+    ipaddress.ip_network("0.0.0.0/32"),  # unspecified
 ]
 _ALLOWED_IPv6_NETWORKS = [
-    ipaddress.ip_network("::1/128"),            # loopback
-    ipaddress.ip_network("fc00::/7"),           # unique-local
-    ipaddress.ip_network("2001:db8::/32"),      # RFC3849 documentation
+    ipaddress.ip_network("::1/128"),  # loopback
+    ipaddress.ip_network("fc00::/7"),  # unique-local
+    ipaddress.ip_network("2001:db8::/32"),  # RFC3849 documentation
 ]
 _ALLOWED_IP_NETWORKS = _ALLOWED_IPv4_NETWORKS + _ALLOWED_IPv6_NETWORKS
 
@@ -82,7 +81,7 @@ def _iter_strings(value) -> Iterator[str]:
     elif isinstance(value, dict):
         for k, v in value.items():
             if isinstance(k, str):
-                yield k           # keys may contain IP literals (e.g. {"8.8.8.8": ...})
+                yield k  # keys may contain IP literals (e.g. {"8.8.8.8": ...})
             yield from _iter_strings(v)
     elif isinstance(value, (list, tuple)):
         for v in value:

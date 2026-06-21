@@ -3,14 +3,16 @@
 import pytest
 import torch
 
-from vajra.config import VajraConfig, FusionConfig
-from vajra.fusion.kill_chain import KillChainStateMachine, N_STATES, KILL_CHAIN_STATES
-from vajra.fusion.epistemic_fusion import EpistemicFusionLayer, EarlyExitResult
+from vajra.config import FusionConfig, VajraConfig
+from vajra.fusion.epistemic_fusion import EarlyExitResult, EpistemicFusionLayer
+from vajra.fusion.kill_chain import (KILL_CHAIN_STATES, N_STATES,
+                                     KillChainStateMachine)
 
 CFG = VajraConfig()
 
 
 # ── Kill-chain state machine ───────────────────────────────────────────────────
+
 
 class TestKillChainStateMachine:
 
@@ -35,7 +37,7 @@ class TestKillChainStateMachine:
             kc.transition_head.bias = nn.Parameter(torch.zeros(N_STATES))
             kc.transition_head.bias.data[3] = 10.0  # strongly prefer EXPLOIT
         logits, next_s = kc(h, state)
-        assert next_s.item() == 3   # EXPLOIT (advance one from DELIVER)
+        assert next_s.item() == 3  # EXPLOIT (advance one from DELIVER)
 
     def test_skip_stage_blocked(self):
         """EXPLOIT (3) → EXFIL (6): gap > 1, should be blocked."""
@@ -45,7 +47,7 @@ class TestKillChainStateMachine:
         with torch.no_grad():
             kc.transition_head.weight.zero_()
             kc.transition_head.bias = nn.Parameter(torch.zeros(N_STATES))
-            kc.transition_head.bias.data[6] = 100.0   # try to jump to EXFIL
+            kc.transition_head.bias.data[6] = 100.0  # try to jump to EXFIL
         _, next_s = kc(h, state)
         # EXFIL is blocked; should stay at 3 or advance to 4
         assert next_s.item() in (3, 4)
@@ -73,10 +75,10 @@ class TestKillChainStateMachine:
         assert next_s.item() == 6
 
 
-import torch.nn as nn   # needed in test above
-
+import torch.nn as nn  # needed in test above
 
 # ── Epistemic Fusion Layer ─────────────────────────────────────────────────────
+
 
 def _make_tiny_cfg():
     cfg = VajraConfig()
@@ -94,7 +96,7 @@ class TestEpistemicFusionLayer:
         x = torch.randn(2, 7, 64)
         result = fusion(x)
         assert result.decision_logits.shape == (2, 4)
-        assert result.decision_probs.shape  == (2, 4)
+        assert result.decision_probs.shape == (2, 4)
         assert result.kill_chain_state.shape == (2,)
         assert result.exit_block == 6
 
@@ -149,11 +151,11 @@ class TestEpistemicFusionLayer:
         fusion = self._make_fusion()
         x = torch.randn(1, 7, 64)
         present_mask = torch.ones(1, 7, dtype=torch.bool)
-        present_mask[0, 4] = False   # domain 4 absent
+        present_mask[0, 4] = False  # domain 4 absent
 
         # Run twice: same input but domain 4 absent vs. present
         with torch.no_grad():
-            r_absent  = fusion(x, present_mask=present_mask)
+            r_absent = fusion(x, present_mask=present_mask)
             r_present = fusion(x, present_mask=None)
 
         # Outputs should differ (absent domain token ≠ original CLS)
@@ -179,7 +181,9 @@ class TestEpistemicFusionLayer:
         """Full-size fusion actual ~76M (spec ~100M assumed full FFN; SwiGLU reduces intermediate)."""
         fusion = EpistemicFusionLayer(CFG)
         n = sum(p.numel() for p in fusion.parameters())
-        assert 60_000_000 <= n <= 120_000_000, f"Fusion param count {n:,} outside expected range"
+        assert (
+            60_000_000 <= n <= 120_000_000
+        ), f"Fusion param count {n:,} outside expected range"
 
     def test_f3_logits_always_populated_on_full_path(self):
         """F3 markers must be present even when early-exit does NOT fire (hard constraint)."""
@@ -188,13 +192,14 @@ class TestEpistemicFusionLayer:
         result = fusion(x)
         assert not result.early_exit, "Expected non-early-exit path for this test"
         assert result.f3_logits is not None, "f3_logits missing on full (F6) path"
-        assert result.f3_probs is not None,  "f3_probs missing on full (F6) path"
+        assert result.f3_probs is not None, "f3_probs missing on full (F6) path"
         assert result.f3_logits.shape == (2, 4)
-        assert result.f3_probs.shape  == (2, 4)
+        assert result.f3_probs.shape == (2, 4)
 
     def test_f3_logits_populated_on_early_exit_path(self):
         """F3 markers must also be present when early-exit fires."""
         from vajra.config import VajraConfig
+
         fusion = EpistemicFusionLayer(VajraConfig())
         fusion.eval()
         with torch.no_grad():

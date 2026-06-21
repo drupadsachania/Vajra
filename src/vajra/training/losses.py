@@ -21,8 +21,12 @@ class FMLMLoss(nn.Module):
     tokens (non-sentinel positions) contribute.
     """
 
-    def __init__(self, sentinel_id_min: int = 50408, sentinel_id_max: int = 50427,
-                 ignore_index: int = -100):
+    def __init__(
+        self,
+        sentinel_id_min: int = 50408,
+        sentinel_id_max: int = 50427,
+        ignore_index: int = -100,
+    ):
         super().__init__()
         self.sentinel_id_min = sentinel_id_min
         self.sentinel_id_max = sentinel_id_max
@@ -46,7 +50,9 @@ class FMLMLoss(nn.Module):
 
         if sentinel_mask is None:
             # Build mask from any label that falls in the sentinel range
-            sentinel_mask = (labels >= self.sentinel_id_min) & (labels <= self.sentinel_id_max)
+            sentinel_mask = (labels >= self.sentinel_id_min) & (
+                labels <= self.sentinel_id_max
+            )
 
         # Merge: positions that are either ignored or sentinel get -100
         effective_labels = labels.clone()
@@ -86,8 +92,9 @@ class KillChainLoss(nn.Module):
         """
         if current_states is not None:
             from vajra.fusion.kill_chain import _build_transition_mask
+
             mask = _build_transition_mask().to(state_logits.device)  # (7, 7)
-            allowed = mask[current_states]   # (batch, 7) — 0.0 allowed, -inf blocked
+            allowed = mask[current_states]  # (batch, 7) — 0.0 allowed, -inf blocked
             state_logits = state_logits + allowed
         return F.cross_entropy(state_logits, target_states, reduction="mean")
 
@@ -195,7 +202,7 @@ class BaNELLoss(nn.Module):
         # Detach baseline so gradient does not flow into the EMA-frozen stream.
         # Use log_softmax for numerical stability (avoids log(p + eps) in fp16).
         log_b = F.log_softmax(logits_baseline[null_mask].detach(), dim=-1)  # (N, V)
-        log_o = F.log_softmax(logits_observed[null_mask], dim=-1)            # (N, V)
+        log_o = F.log_softmax(logits_observed[null_mask], dim=-1)  # (N, V)
 
         # KL(P_base || P_obs) via F.kl_div (expects log-space input, linear target).
         kl = F.kl_div(log_o, log_b.exp(), reduction="none").sum(dim=-1)  # (N,)
@@ -229,16 +236,19 @@ class DPOLoss(nn.Module):
 
         Returns scalar DPO loss.
         """
+
         def _seq_log_prob(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
             # Sum log-probs over non-ignored positions
             log_p = F.log_softmax(logits, dim=-1)
             mask = labels != -100
-            token_log_p = log_p.gather(-1, labels.clamp(min=0).unsqueeze(-1)).squeeze(-1)
+            token_log_p = log_p.gather(-1, labels.clamp(min=0).unsqueeze(-1)).squeeze(
+                -1
+            )
             token_log_p = token_log_p * mask.float()
             return token_log_p.sum(dim=-1)  # (batch,)
 
-        pi_w  = _seq_log_prob(logits_w, labels_w)
-        pi_l  = _seq_log_prob(logits_l, labels_l)
+        pi_w = _seq_log_prob(logits_w, labels_w)
+        pi_l = _seq_log_prob(logits_l, labels_l)
         # Detach reference logits: gradient must not flow into the reference model.
         ref_w = _seq_log_prob(ref_logits_w.detach(), labels_w)
         ref_l = _seq_log_prob(ref_logits_l.detach(), labels_l)

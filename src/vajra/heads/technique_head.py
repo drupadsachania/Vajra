@@ -33,7 +33,9 @@ class ATTACKClassifier(nn.Module):
         return (probs > self.THRESHOLD).float()
 
     @staticmethod
-    def loss(logits: torch.Tensor, targets: torch.Tensor, eps: float = 0.1) -> torch.Tensor:
+    def loss(
+        logits: torch.Tensor, targets: torch.Tensor, eps: float = 0.1
+    ) -> torch.Tensor:
         """BCE with label smoothing ε=0.1."""
         targets_smooth = targets * (1 - eps) + 0.5 * eps
         return F.binary_cross_entropy_with_logits(logits, targets_smooth)

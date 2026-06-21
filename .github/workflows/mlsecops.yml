@@ -1,0 +1,42 @@
+name: MLSecOps Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  validate-and-test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.11"
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install black isort mypy bandit pytest torch
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        
+    - name: Check code formatting (Black)
+      run: black --check src/ tests/
+      
+    - name: Check import sorting (isort)
+      run: isort --check src/ tests/
+      
+    - name: Run static type checking (Mypy)
+      run: mypy --ignore-missing-imports src/
+      
+    - name: Run security analysis (Bandit)
+      run: bandit -r src/
+      
+    - name: Validate Specification Lock-in
+      run: python validate_requirements.py
+      
+    - name: Run Unit Tests
+      run: pytest tests/
